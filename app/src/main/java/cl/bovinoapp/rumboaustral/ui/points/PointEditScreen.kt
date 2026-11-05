@@ -45,7 +45,9 @@ fun PointEditScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(pointId) {
-        if (pointId != 0L) {
+        if (pointId == 0L) {
+            name = viewModel.nextDefaultName()
+        } else {
             viewModel.pointById(pointId)?.let { point ->
                 name = point.name
                 notes = point.notes

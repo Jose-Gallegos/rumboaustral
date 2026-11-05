@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -61,6 +62,15 @@ class PointsViewModel(private val repository: PointsRepository) : ViewModel() {
     }
 
     suspend fun pointById(id: Long): Point? = repository.getById(id)
+
+    /** Siguiente nombre libre con el formato "Waypoint N" (N = mayor sufijo existente + 1). */
+    suspend fun nextDefaultName(): String {
+        val regex = Regex("^Waypoint (\\d+)$", RegexOption.IGNORE_CASE)
+        val max = repository.observeAll().first()
+            .mapNotNull { regex.find(it.name.trim())?.groupValues?.get(1)?.toIntOrNull() }
+            .maxOrNull() ?: 0
+        return "Waypoint ${max + 1}"
+    }
 
     fun exportGpx(out: OutputStream) {
         viewModelScope.launch {
