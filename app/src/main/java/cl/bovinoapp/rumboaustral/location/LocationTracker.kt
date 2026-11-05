@@ -8,7 +8,9 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlin.coroutines.resume
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
@@ -42,6 +44,18 @@ class LocationTracker(context: Context) {
         }
         client.requestLocationUpdates(request, callback, null)
         awaitClose { client.removeLocationUpdates(callback) }
+    }
+
+    /** Ultima ubicacion conocida por el sistema (puede ser null o antigua). No activa el GPS. */
+    @SuppressLint("MissingPermission")
+    suspend fun lastKnown(): LocationState? = try {
+        suspendCancellableCoroutine { cont ->
+            client.lastLocation
+                .addOnSuccessListener { cont.resume(it?.toState()) }
+                .addOnFailureListener { cont.resume(null) }
+        }
+    } catch (e: SecurityException) {
+        null
     }
 
     private fun Location.toState() = LocationState(

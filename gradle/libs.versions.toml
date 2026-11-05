@@ -39,7 +39,7 @@ androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = 
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
-mapbox-maps-android = { group = "com.mapbox.maps", name = "android", version.ref = "mapbox" }
+mapbox-maps-android = { group = "com.mapbox.maps", name = "android-ndk27", version.ref = "mapbox" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

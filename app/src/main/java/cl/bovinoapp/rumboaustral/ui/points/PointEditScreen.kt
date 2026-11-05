@@ -38,6 +38,7 @@ fun PointEditScreen(
     val viewModel: PointsViewModel = viewModel(factory = pointsViewModelFactory(container))
 
     var name by remember { mutableStateOf("") }
+    var nameEdited by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
     var latitudeText by remember { mutableStateOf(initialLatitude.toString()) }
     var longitudeText by remember { mutableStateOf(initialLongitude.toString()) }
@@ -46,7 +47,9 @@ fun PointEditScreen(
 
     LaunchedEffect(pointId) {
         if (pointId == 0L) {
-            name = viewModel.nextDefaultName()
+            val defaultName = viewModel.nextDefaultName()
+            // Si el usuario ya escribio algo mientras se consultaba la base, no lo pisamos.
+            if (!nameEdited) name = defaultName
         } else {
             viewModel.pointById(pointId)?.let { point ->
                 name = point.name
@@ -65,7 +68,7 @@ fun PointEditScreen(
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = { name = it; nameEdited = true },
                 label = { Text("Nombre") },
                 modifier = Modifier.fillMaxWidth()
             )

@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
+import cl.bovinoapp.rumboaustral.map.CameraSnapshot
+import cl.bovinoapp.rumboaustral.map.LatLon
 import cl.bovinoapp.rumboaustral.ui.mapViewModelFactory
 import com.mapbox.geojson.Point as GeoPoint
 import com.mapbox.maps.CameraOptions
@@ -39,6 +41,11 @@ import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.gestures
 import com.mapbox.maps.plugin.locationcomponent.location
 
+private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builder()
+    .center(GeoPoint.fromLngLat(longitude, latitude))
+    .zoom(15.0)
+    .build()
+
 @Composable
 fun MapScreen(
     container: AppContainer,
@@ -52,20 +59,33 @@ fun MapScreen(
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
     val markerBitmap = remember { createPointMarkerBitmap() }
 
-    // Centrado inicial: una sola vez, apenas haya GPS, salvo que el usuario ya haya movido el mapa.
-    val userMoved = remember { mutableStateOf(false) }
-    val initialCentered = remember { mutableStateOf(false) }
+    val store = container.mapStateStore
     val map = mapViewRef.value?.mapboxMap
+
+    // Sin camara guardada y sin GPS aun: usar la ultima ubicacion conocida del sistema
+    // si nunca habiamos guardado una propia.
+    LaunchedEffect(map) {
+        if (map != null && store.camera == null && store.lastLocation == null) {
+            val known = container.locationTracker.lastKnown()
+            // Tras la espera pudo llegar un GPS en vivo (que ya guardo su posicion y centro el mapa):
+            // en ese caso la ubicacion del sistema es mas antigua y se descarta. Ambos efectos corren
+            // en el hilo principal, asi que esta comprobacion y la asignacion no se intercalan.
+            if (known != null && store.lastLocation == null) {
+                store.lastLocation = LatLon(known.latitude, known.longitude)
+                if (store.autoCenterPending) {
+                    map.setCamera(cameraAt(known.latitude, known.longitude))
+                }
+            }
+        }
+    }
+
+    // Centrado automatico: una sola vez con el primer GPS, salvo que el usuario ya haya movido el mapa.
     LaunchedEffect(currentLocation, map) {
-        val loc = currentLocation
-        if (!initialCentered.value && !userMoved.value && loc != null && map != null) {
-            map.setCamera(
-                CameraOptions.Builder()
-                    .center(GeoPoint.fromLngLat(loc.longitude, loc.latitude))
-                    .zoom(15.0)
-                    .build()
-            )
-            initialCentered.value = true
+        val loc = currentLocation ?: return@LaunchedEffect
+        store.lastLocation = LatLon(loc.latitude, loc.longitude)
+        if (store.autoCenterPending && map != null) {
+            map.setCamera(cameraAt(loc.latitude, loc.longitude))
+            store.autoCenterPending = false
         }
     }
 
@@ -76,17 +96,30 @@ fun MapScreen(
                 MapView(context).apply {
                     mapViewRef.value = this
                     mapboxMap.loadStyle(Style.SATELLITE_STREETS)
+                    val saved = store.camera
+                    val last = store.lastLocation
                     mapboxMap.setCamera(
-                        CameraOptions.Builder()
-                            .center(GeoPoint.fromLngLat(-72.65, -53.62))
-                            .zoom(11.0)
-                            .build()
+                        when {
+                            saved != null -> CameraOptions.Builder()
+                                .center(GeoPoint.fromLngLat(saved.longitude, saved.latitude))
+                                .zoom(saved.zoom)
+                                .build()
+                            last != null -> cameraAt(last.latitude, last.longitude)
+                            else -> CameraOptions.Builder()
+                                .center(GeoPoint.fromLngLat(-72.65, -53.62))
+                                .zoom(11.0)
+                                .build()
+                        }
                     )
+                    mapboxMap.subscribeCameraChanged {
+                        val c = mapboxMap.cameraState
+                        store.camera = CameraSnapshot(c.center.latitude(), c.center.longitude(), c.zoom)
+                    }
                     location.updateSettings { enabled = true }
                     annotationManagerRef.value = annotations.createPointAnnotationManager()
                     gestures.addOnMoveListener(object : OnMoveListener {
                         override fun onMoveBegin(detector: MoveGestureDetector) {
-                            userMoved.value = true
+                            store.autoCenterPending = false
                         }
                         override fun onMove(detector: MoveGestureDetector): Boolean = false
                         override fun onMoveEnd(detector: MoveGestureDetector) {}
