@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Archivos de sesion del compilador de Kotlin
+.kotlin/
