@@ -113,8 +113,8 @@ private const val POINTS_LAYER_ID = "rumbo-points-layer"
 /** Radio, en dp alrededor de la cruz central, dentro del cual un punto suelto se resalta. */
 private const val CROSSHAIR_RADIUS_DP = 20f
 
-/** Punto resaltado bajo la cruz y cuántos otros puntos sueltos hay dentro del radio. */
-private data class CrosshairTarget(val pointId: Long, val moreCount: Int)
+/** Punto resaltado bajo la cruz. */
+private data class CrosshairTarget(val pointId: Long)
 
 /**
  * Punto suelto más cercano al centro de la vista (donde está la cruz) dentro de [radiusPx], o null. Consulta solo la
@@ -146,7 +146,7 @@ private suspend fun probeCrosshair(view: MapView, radiusPx: Float): CrosshairTar
         val pixel = map.pixelForCoordinate(geometry)
         id to hypot(pixel.x - cx, pixel.y - cy)
     }.filter { it.second <= radiusPx }.distinctBy { it.first }.sortedBy { it.second }
-    return hits.firstOrNull()?.let { CrosshairTarget(it.first, hits.size - 1) }
+    return hits.firstOrNull()?.let { CrosshairTarget(it.first) }
 }
 
 private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builder()
@@ -366,8 +366,7 @@ fun MapScreen(
             formatDistance(distanceMeters(it.latitude, it.longitude, point.latitude, point.longitude))
         }
         val labelNames = LabelKind.entries.mapNotNull { kind -> point.labelIdFor(kind)?.let { id -> allLabels.firstOrNull { it.id == id }?.name } }
-        val more = crosshairTarget.value?.moreCount?.takeIf { it > 0 }?.let { "+$it más" }
-        val second = (labelNames + listOfNotNull(more)).joinToString(" · ")
+        val second = labelNames.joinToString(" · ")
         listOfNotNull(if (distance != null) "${point.name} - $distance" else point.name, second.ifEmpty { null })
             .joinToString("\n")
     }
