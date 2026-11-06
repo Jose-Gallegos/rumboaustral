@@ -1,6 +1,8 @@
 package cl.bovinoapp.rumboaustral.gpx
 
 import android.util.Xml
+import cl.bovinoapp.rumboaustral.data.LabelKind
+import cl.bovinoapp.rumboaustral.data.LabelRef
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
 import java.io.ByteArrayInputStream
@@ -19,7 +21,9 @@ data class RawEntry(
     val latitude: Double?,
     val longitude: Double?,
     val notes: String,
-    val problem: String? = null
+    val problem: String? = null,
+    /** Etiquetas que traía el archivo (solo GPX), por nombre; se resuelven contra las existentes al importar. */
+    val labels: List<LabelRef> = emptyList()
 )
 
 data class ParsedFile(val entries: List<RawEntry>, val truncated: Boolean)
@@ -79,6 +83,9 @@ object PointFileParser {
 
     private fun parseXml(bytes: ByteArray): ParsedFile {
         val p = Xml.newPullParser()
+        // Con namespaces activos, `name` es el nombre local y `namespace` la URI: así se distinguen las extensiones
+        // propias de las de otras apps. Android ya lo activa; se fija aquí para no depender de ese detalle.
+        p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
         p.setInput(ByteArrayInputStream(bytes), null)
         while (p.eventType != XmlPullParser.START_TAG) {
             if (p.next() == XmlPullParser.END_DOCUMENT) throw ImportFormatException("El archivo está vacío")
@@ -105,6 +112,25 @@ object PointFileParser {
         }
     }
 
+    /**
+     * Lee los `<rumbo:label kind="TYPE" color="#RRGGBB">Nombre</rumbo:label>` dentro de `<extensions>`; el resto
+     * de las extensiones (de otras apps) se ignora. Deja el parser en el END_TAG de `extensions`.
+     */
+    private fun readLabelExtensions(p: XmlPullParser, out: MutableList<LabelRef>) {
+        val depth = p.depth
+        while (true) {
+            val ev = p.next()
+            if (ev == XmlPullParser.END_DOCUMENT || (ev == XmlPullParser.END_TAG && p.depth == depth)) return
+            if (ev != XmlPullParser.START_TAG || p.depth != depth + 1 || p.local() != "label") continue
+            // Solo el elemento de NUESTRO namespace: otra app puede usar un `label` propio con otro significado.
+            if (p.namespace != GpxIo.RUMBO_NAMESPACE) continue
+            val kind = LabelKind.entries.firstOrNull { it.name == p.getAttributeValue(null, "kind")?.trim() }
+            val color = GpxIo.parseColor(p.getAttributeValue(null, "color"))
+            val name = readText(p)
+            if (kind != null) out += LabelRef(kind, name, color)
+        }
+    }
+
     private fun parseGpx(p: XmlPullParser): ParsedFile {
         val out = mutableListOf<RawEntry>()
         var index = 0
@@ -118,6 +144,8 @@ object PointFileParser {
             var name = ""
             var desc = ""
             var cmt = ""
+            var type = ""
+            val extensionLabels = mutableListOf<LabelRef>()
             while (true) {
                 val ev = p.next()
                 if (ev == XmlPullParser.END_DOCUMENT || (ev == XmlPullParser.END_TAG && p.depth == depth)) break
@@ -126,11 +154,16 @@ object PointFileParser {
                         "name" -> name = readText(p)
                         "desc" -> desc = readText(p)
                         "cmt" -> cmt = readText(p)
+                        "type" -> type = readText(p)
+                        "extensions" -> readLabelExtensions(p, extensionLabels)
                     }
                 }
             }
+            // Las etiquetas propias (extensions) mandan; `type` de otras apps sirve como Tipo si no hay.
+            val labels = extensionLabels.toMutableList()
+            if (type.isNotBlank() && labels.none { it.kind == LabelKind.TYPE }) labels += LabelRef(LabelKind.TYPE, type)
             val problem = if (lat == null || lon == null) "Falta latitud o longitud" else null
-            out += RawEntry("Punto #$index", name, lat, lon, desc.ifBlank { cmt }, problem)
+            out += RawEntry("Punto #$index", name, lat, lon, desc.ifBlank { cmt }, problem, labels)
         }
         return ParsedFile(out, truncated = false)
     }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import cl.bovinoapp.rumboaustral.data.AutoClassifier
 import cl.bovinoapp.rumboaustral.data.AutoClassifyPlan
 import cl.bovinoapp.rumboaustral.data.Label
+import cl.bovinoapp.rumboaustral.data.LabelImport
 import cl.bovinoapp.rumboaustral.data.LabelKind
 import cl.bovinoapp.rumboaustral.data.LabelsRepository
 import cl.bovinoapp.rumboaustral.data.Point
@@ -44,7 +45,9 @@ data class PointListItem(val point: Point, val distanceMeters: Double?, val labe
 data class ImportPreview(
     val fileName: String,
     val plan: ImportPlan,
-    val selected: Set<Int>
+    val selected: Set<Int>,
+    /** Etiquetas que ya existían al leer el archivo; sirven para saber cuáles se crearían. */
+    val existingLabels: List<Label> = emptyList()
 )
 
 class PointsViewModel(
@@ -148,8 +151,9 @@ class PointsViewModel(
             try {
                 val count = withContext(Dispatchers.IO) {
                     val points = repository.observeAll().first()
+                    val labels = labelsRepository.observeAll().first()
                     val out = open() ?: throw java.io.IOException("No se pudo crear el archivo")
-                    out.use { GpxIo.export(points, it) }
+                    out.use { GpxIo.export(points, it, labels) }
                     points.size
                 }
                 _message.value = when (count) {
@@ -190,11 +194,11 @@ class PointsViewModel(
         _importing.value = true
         viewModelScope.launch {
             try {
-                val plan = withContext(Dispatchers.IO) {
+                val (plan, existingLabels) = withContext(Dispatchers.IO) {
                     val parsed = (open() ?: throw ImportFormatException("No se pudo abrir el archivo"))
                         .use { PointFileParser.parse(it) }
                     val existing = repository.observeAll().first()
-                    ImportPlanner.plan(parsed, existing)
+                    ImportPlanner.plan(parsed, existing) to labelsRepository.observeAll().first()
                 }
                 if (plan.candidates.isEmpty()) {
                     _message.value = if (plan.invalid.isEmpty()) "El archivo no contiene puntos"
@@ -202,7 +206,7 @@ class PointsViewModel(
                 } else {
                     val preselected = plan.candidates.indices
                         .filter { plan.candidates[it].status == ImportStatus.NEW }.toSet()
-                    _importPreview.value = ImportPreview(fileName, plan, preselected)
+                    _importPreview.value = ImportPreview(fileName, plan, preselected, existingLabels)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -353,14 +357,21 @@ class PointsViewModel(
     fun confirmImport() {
         if (_saving.value) return
         val preview = _importPreview.value ?: return
-        val points = preview.selected.sorted().map { preview.plan.candidates[it].toPoint() }
-        if (points.isEmpty()) return
+        val entries = preview.selected.sorted().map { preview.plan.candidates[it].let { c -> c.toPoint() to c.labels } }
+        if (entries.isEmpty()) return
+        // Las etiquetas nuevas se calculan con las que existían al abrir la vista previa; es solo para el aviso.
+        val newLabelCount = LabelImport.missing(entries.flatMap { it.second }, preview.existingLabels).size
         _saving.value = true
         viewModelScope.launch {
             try {
-                repository.importAll(points)
+                repository.importWithLabels(entries)
                 _importPreview.value = null
-                _message.value = if (points.size == 1) "1 punto importado" else "${points.size} puntos importados"
+                val pointsText = if (entries.size == 1) "1 punto importado" else "${entries.size} puntos importados"
+                _message.value = when (newLabelCount) {
+                    0 -> pointsText
+                    1 -> "$pointsText y 1 etiqueta nueva"
+                    else -> "$pointsText y $newLabelCount etiquetas nuevas"
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

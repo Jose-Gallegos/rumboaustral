@@ -91,6 +91,42 @@ interface PointDao {
         return changed
     }
 
+    @Query("SELECT * FROM labels")
+    suspend fun allLabels(): List<Label>
+
+    @Insert
+    suspend fun insertLabel(label: Label): Long
+
+    /**
+     * Importa puntos junto con las etiquetas que traían (por nombre) en una sola transacción: reutiliza las
+     * etiquetas existentes de la misma categoría, crea las que faltan y luego inserta los puntos.
+     * @return puntos insertados.
+     */
+    @Transaction
+    suspend fun importWithLabels(entries: List<Pair<Point, List<LabelRef>>>): Int {
+        val existing = allLabels()
+        val idByKey = existing.associate { (it.kind to LabelImport.key(it.name)) to it.id }.toMutableMap()
+        val nextOrder = LabelKind.entries.associateWith { kind ->
+            (existing.filter { it.kind == kind }.maxOfOrNull { it.sortOrder } ?: -1) + 1
+        }.toMutableMap()
+        var created = 0
+        for (ref in LabelImport.missing(entries.flatMap { it.second }, existing)) {
+            val order = nextOrder.getValue(ref.kind)
+            nextOrder[ref.kind] = order + 1
+            val color = ref.color ?: LABEL_PALETTE[(existing.size + created) % LABEL_PALETTE.size]
+            created++
+            idByKey[ref.kind to LabelImport.key(ref.name)] =
+                insertLabel(Label(kind = ref.kind, name = ref.name, color = color, sortOrder = order))
+        }
+        val points = entries.map { (point, refs) ->
+            refs.fold(point) { p, ref ->
+                idByKey[ref.kind to LabelImport.key(ref.name)]?.let { p.withLabel(ref.kind, it) } ?: p
+            }
+        }
+        insertAll(points)
+        return points.size
+    }
+
     @Delete
     suspend fun delete(point: Point)
 

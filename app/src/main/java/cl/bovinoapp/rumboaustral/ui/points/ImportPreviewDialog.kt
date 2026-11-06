@@ -26,10 +26,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.remember
+import cl.bovinoapp.rumboaustral.data.LabelImport
+import cl.bovinoapp.rumboaustral.data.LabelKind
 import cl.bovinoapp.rumboaustral.geo.defaultCoordinateFormat
 import cl.bovinoapp.rumboaustral.gpx.ImportStatus
 
 private const val MAX_INVALID_SHOWN = 50
+private const val MAX_NEW_LABELS_SHOWN = 5
 
 @Composable
 fun ImportPreviewDialog(
@@ -59,6 +63,24 @@ fun ImportPreviewDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 4.dp)
                     )
+                    // Etiquetas del archivo que no existen todavía: se crean al importar, y conviene verlo antes.
+                    val newLabels = remember(preview) {
+                        LabelImport.missing(preview.selected.flatMap { plan.candidates[it].labels }, preview.existingLabels)
+                    }
+                    if (newLabels.isNotEmpty()) {
+                        val summary = LabelKind.entries.mapNotNull { kind ->
+                            val names = newLabels.filter { it.kind == kind }.map { it.name }
+                            if (names.isEmpty()) null
+                            else "${kind.displayName}: ${names.take(MAX_NEW_LABELS_SHOWN).joinToString(", ")}" +
+                                if (names.size > MAX_NEW_LABELS_SHOWN) " y ${names.size - MAX_NEW_LABELS_SHOWN} más" else ""
+                        }.joinToString(" · ")
+                        Text(
+                            "Se crearán ${newLabels.size} etiquetas nuevas — $summary",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                     if (plan.truncated) {
                         Text(
                             "El archivo tiene más puntos; solo se leyeron los primeros.",
@@ -86,6 +108,14 @@ fun ImportPreviewDialog(
                                 Text(format.format(c.latitude, c.longitude), style = MaterialTheme.typography.bodySmall)
                                 if (c.notes.isNotBlank()) {
                                     Text(c.notes, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (c.labels.isNotEmpty()) {
+                                    Text(
+                                        c.labels.joinToString(" · ") { it.name },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                                 when (c.status) {
                                     ImportStatus.NEW -> Unit

@@ -1,5 +1,7 @@
 package cl.bovinoapp.rumboaustral.gpx
 
+import cl.bovinoapp.rumboaustral.data.LabelImport
+import cl.bovinoapp.rumboaustral.data.LabelRef
 import cl.bovinoapp.rumboaustral.data.Point
 import cl.bovinoapp.rumboaustral.geo.distanceMeters
 
@@ -10,7 +12,9 @@ data class ImportCandidate(
     val latitude: Double,
     val longitude: Double,
     val notes: String,
-    val status: ImportStatus
+    val status: ImportStatus,
+    /** Etiquetas del archivo (una por categoría como máximo), ya limpias; se resuelven al guardar. */
+    val labels: List<LabelRef> = emptyList()
 ) {
     fun toPoint() = Point(name = name, latitude = latitude, longitude = longitude, notes = notes)
 }
@@ -66,7 +70,7 @@ object ImportPlanner {
                 else -> ImportStatus.NEW
             }
             seenInFile.getOrPut(key) { mutableListOf() } += lat to lon
-            candidates += ImportCandidate(name, lat, lon, notes, status)
+            candidates += ImportCandidate(name, lat, lon, notes, status, LabelImport.sanitize(entry.labels))
         }
         return ImportPlan(candidates, invalid, file.truncated)
     }

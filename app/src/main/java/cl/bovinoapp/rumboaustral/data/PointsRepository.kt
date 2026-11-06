@@ -33,7 +33,6 @@ class PointsRepository(private val dao: PointDao) {
 
     suspend fun delete(point: Point) = dao.delete(point)
 
-    suspend fun importAll(points: List<Point>) {
-        dao.insertAll(points)
-    }
+    /** Inserta los puntos con sus etiquetas (creando las que falten), todo o nada. @return puntos insertados. */
+    suspend fun importWithLabels(entries: List<Pair<Point, List<LabelRef>>>): Int = dao.importWithLabels(entries)
 }

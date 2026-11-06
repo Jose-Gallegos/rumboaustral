@@ -48,14 +48,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import cl.bovinoapp.rumboaustral.data.LABEL_PALETTE
 import cl.bovinoapp.rumboaustral.data.Label
+import cl.bovinoapp.rumboaustral.data.LabelImport
 import cl.bovinoapp.rumboaustral.data.LabelKind
 import kotlinx.coroutines.launch
 
-private val palette = listOf(
-    0xFFE53935, 0xFFFB8C00, 0xFFFDD835, 0xFF43A047, 0xFF00897B, 0xFF1E88E5,
-    0xFF3949AB, 0xFF8E24AA, 0xFFD81B60, 0xFF6D4C41, 0xFF757575, 0xFF212121
-).map { it.toInt() }
+private val palette = LABEL_PALETTE
 
 /** Edición de una etiqueta existente ([label] != null) o alta de una nueva en [kind]. */
 private data class EditorState(val kind: LabelKind, val label: Label?)
@@ -164,7 +163,7 @@ fun LabelsManagerSheet(viewModel: LabelsViewModel, onDismiss: () -> Unit) {
         LabelEditorDialog(
             state = state,
             existingNames = allLabels.filter { it.kind == state.kind && it.id != state.label?.id }
-                .map { it.name.lowercase() }.toSet(),
+                .map { LabelImport.key(it.name) }.toSet(),
             busy = busy,
             error = error,
             onDismiss = { if (!busy) editor = null },
@@ -216,7 +215,7 @@ private fun LabelEditorDialog(
     var name by remember { mutableStateOf(state.label?.name ?: "") }
     var color by remember { mutableStateOf(state.label?.color ?: palette.first()) }
     val trimmed = name.trim()
-    val duplicate = trimmed.lowercase() in existingNames
+    val duplicate = LabelImport.key(trimmed) in existingNames
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (state.label == null) "Nueva etiqueta de ${state.kind.displayName.lowercase()}" else "Editar etiqueta") },
