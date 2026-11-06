@@ -361,17 +361,23 @@ fun MapScreen(
     val crosshairPoint = remember(crosshairTarget.value, points) {
         crosshairTarget.value?.let { target -> points.firstOrNull { it.id == target.pointId } }
     }
-    val crosshairText: String? = crosshairPoint?.let { point ->
+    val crosshairText: String? = selectedPoint?.let { point ->
         val distance = currentLocation?.let {
             formatDistance(distanceMeters(it.latitude, it.longitude, point.latitude, point.longitude))
         }
         if (distance != null) "${point.name} - $distance" else point.name
     }
+    // Al llegar la cruz a un punto distinto, ese punto pasa a ser el seleccionado (como si se tocara). Un toque
+    // posterior sobre otro waypoint lo reemplaza, y cerrar el panel funciona aunque la cruz siga encima.
+    LaunchedEffect(crosshairPoint?.id) {
+        crosshairPoint?.let { selectedPointId.value = it.id }
+    }
     val highlightManager = highlightManagerRef.value
-    LaunchedEffect(crosshairPoint?.id, crosshairText, highlightManager, markers) {
+    // El resaltado sigue al punto seleccionado (bajo la cruz o tocado), igual que el panel.
+    LaunchedEffect(selectedPoint?.id, crosshairText, highlightManager, markers) {
         val overlay = highlightManager ?: return@LaunchedEffect
         overlay.deleteAll()
-        val point = crosshairPoint ?: return@LaunchedEffect
+        val point = selectedPoint ?: return@LaunchedEffect
         val color = markers.firstOrNull { it.id == point.id }?.color ?: UNLABELED_COLOR
         overlay.create(
             PointAnnotationOptions()
