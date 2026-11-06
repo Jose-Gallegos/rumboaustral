@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Switch
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -38,7 +41,10 @@ fun PointFilterSheet(
     onToggle: (LabelKind, Long) -> Unit,
     onColorBy: (LabelKind) -> Unit,
     onClear: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** Estado del agrupamiento de marcadores, solo para el mapa; null = la opción no se muestra (la lista no la usa). */
+    clustering: Boolean? = null,
+    onClusteringChange: (Boolean) -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -66,6 +72,19 @@ fun PointFilterSheet(
                         onClick = { onColorBy(kind) },
                         label = { Text(kind.displayName) }
                     )
+                }
+            }
+
+            if (clustering != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Agrupar puntos cercanos", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Muestra un círculo con la cantidad cuando hay muchos puntos juntos; al tocarlo, el mapa se acerca.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(checked = clustering, onCheckedChange = onClusteringChange, modifier = Modifier.padding(start = 12.dp))
                 }
             }
 

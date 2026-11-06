@@ -34,6 +34,14 @@ class MapStateStore(context: Context) {
         } else null
     )
 
+    /** Si el mapa agrupa los marcadores cercanos en círculos con su cantidad. Elección del usuario, persistida; por defecto no. */
+    val clusteringEnabled = MutableStateFlow(prefs.getBoolean(KEY_CLUSTERING, false))
+
+    fun setClustering(enabled: Boolean) {
+        clusteringEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_CLUSTERING, enabled).apply()
+    }
+
     private fun persistNavigation() {
         val id = navigationTargetId.value
         val tmp = temporaryDestination.value
@@ -98,5 +106,6 @@ class MapStateStore(context: Context) {
         const val KEY_NAV_ID = "nav_target_id"
         const val KEY_TMP_LAT = "nav_tmp_lat"
         const val KEY_TMP_LON = "nav_tmp_lon"
+        const val KEY_CLUSTERING = "clustering_enabled"
     }
 }

@@ -16,6 +16,10 @@ import androidx.compose.ui.draw.rotate
 import cl.bovinoapp.rumboaustral.ui.navigation.NavigationViewModel
 import cl.bovinoapp.rumboaustral.ui.navigationViewModelFactory
 import com.mapbox.maps.EdgeInsets
+import com.mapbox.maps.plugin.annotation.AnnotationConfig
+import com.mapbox.maps.plugin.annotation.AnnotationSourceOptions
+import com.mapbox.maps.plugin.annotation.ClusterOptions
+import com.mapbox.maps.plugin.annotation.OnClusterClickListener
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
@@ -81,6 +85,11 @@ import com.mapbox.maps.plugin.gestures.OnMapLongClickListener
 import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.gestures
 import com.mapbox.maps.plugin.locationcomponent.location
+
+// Colores de los grupos de marcadores según cuántos puntos reúnen (grises azulados: no compiten con los de las etiquetas).
+private val CLUSTER_COLOR_SMALL = 0xFF455A64.toInt()
+private val CLUSTER_COLOR_MEDIUM = 0xFF37474F.toInt()
+private val CLUSTER_COLOR_LARGE = 0xFF263238.toInt()
 
 private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builder()
     .center(GeoPoint.fromLngLat(longitude, latitude))
@@ -209,6 +218,56 @@ fun MapScreen(
         }
     }
 
+    // Mapbox fija las opciones de agrupamiento al crear el administrador de marcadores, así que al cambiar la
+    // elección del usuario se quita el anterior y se crea uno nuevo; los marcadores se vuelven a dibujar solos
+    // porque el efecto de más abajo depende del administrador.
+    val clustering by store.clusteringEnabled.collectAsState()
+    val mapView = mapViewRef.value
+    LaunchedEffect(mapView, clustering) {
+        val view = mapView ?: return@LaunchedEffect
+        val plugin = view.annotations
+        annotationManagerRef.value?.let { plugin.removeAnnotationManager(it) }
+        annotationManagerRef.value = null
+        val manager = plugin.createPointAnnotationManager(
+            AnnotationConfig(
+                annotationSourceOptions = AnnotationSourceOptions(
+                    clusterOptions = if (clustering) {
+                        ClusterOptions(
+                            cluster = true,
+                            clusterRadius = 50L,
+                            clusterMaxZoom = 16L, // a partir de ese zoom todos los puntos se ven sueltos
+                            clusterMinPoints = 2L,
+                            textColor = android.graphics.Color.WHITE,
+                            textSize = 14.0,
+                            colorLevels = listOf(0 to CLUSTER_COLOR_SMALL, 25 to CLUSTER_COLOR_MEDIUM, 100 to CLUSTER_COLOR_LARGE)
+                        )
+                    } else {
+                        // Explícito: el valor por defecto de `cluster` en Mapbox es true, así que ClusterOptions()
+                        // a secas agruparía igual.
+                        ClusterOptions(cluster = false)
+                    }
+                )
+            )
+        )
+        manager.addClickListener(OnPointAnnotationClickListener { annotation ->
+            selectedPointId.value = annotation.getData()?.asLong
+            true
+        })
+        // Tocar un grupo acerca el mapa a él para que se separe en grupos más chicos o puntos sueltos.
+        manager.addClusterClickListener(OnClusterClickListener { cluster ->
+            val center = cluster.originalFeature.geometry() as? GeoPoint
+            val map = view.mapboxMap
+            if (center != null) {
+                map.flyTo(
+                    CameraOptions.Builder().center(center).zoom(minOf(map.cameraState.zoom + 2.0, 19.0)).build(),
+                    mapAnimationOptions { duration(500) }
+                )
+            }
+            true
+        })
+        annotationManagerRef.value = manager
+    }
+
     // Los marcadores se recrean solo cuando cambian los puntos visibles o sus colores (no en cada fix de GPS ni
     // recomposicion), y en un unico lote: con cientos de waypoints hacerlo por punto es muy lento.
     val annotationManager = annotationManagerRef.value
@@ -254,12 +313,8 @@ fun MapScreen(
                     location.updateSettings { enabled = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
-                    annotationManagerRef.value = annotations.createPointAnnotationManager().also { manager ->
-                        manager.addClickListener(OnPointAnnotationClickListener { annotation ->
-                            selectedPointId.value = annotation.getData()?.asLong
-                            true
-                        })
-                    }
+                    // El administrador de marcadores se crea aparte (según el agrupamiento elegido); al crearse
+                    // después queda sobre la línea de navegación, igual que antes.
                     gestures.addOnMapClickListener(OnMapClickListener {
                         selectedPointId.value = null
                         false
@@ -346,7 +401,9 @@ fun MapScreen(
                 onToggle = viewModel::toggleFilter,
                 onColorBy = viewModel::setColorBy,
                 onClear = viewModel::clearFilter,
-                onDismiss = { showFilters.value = false }
+                onDismiss = { showFilters.value = false },
+                clustering = clustering,
+                onClusteringChange = store::setClustering
             )
         }
 
