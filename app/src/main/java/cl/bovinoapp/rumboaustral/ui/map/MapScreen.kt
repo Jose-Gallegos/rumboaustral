@@ -98,13 +98,13 @@ fun MapScreen(
     val navState by navViewModel.state.collectAsState()
     val targetId by container.mapStateStore.navigationTargetId.collectAsState()
     val temporaryDestination by container.mapStateStore.temporaryDestination.collectAsState()
-    val targetPoint = points.firstOrNull { it.id == targetId } ?: temporaryDestination
+    val targetPoint = remember(points, targetId) { points.firstOrNull { it.id == targetId } } ?: temporaryDestination
     val polylineManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
 
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
     val pointToDelete = remember { mutableStateOf<Point?>(null) }
-    val selectedPoint = points.firstOrNull { it.id == selectedPointId.value }
+    val selectedPoint = remember(points, selectedPointId.value) { points.firstOrNull { it.id == selectedPointId.value } }
 
     val annotationManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
@@ -200,6 +200,22 @@ fun MapScreen(
         }
     }
 
+    // Los marcadores se recrean solo cuando cambia la lista de puntos (no en cada fix de GPS ni
+    // recomposicion), y en un unico lote: con cientos de waypoints hacerlo por punto es muy lento.
+    val annotationManager = annotationManagerRef.value
+    LaunchedEffect(points, annotationManager) {
+        val manager = annotationManager ?: return@LaunchedEffect
+        manager.deleteAll()
+        manager.create(
+            points.map { point ->
+                PointAnnotationOptions()
+                    .withPoint(GeoPoint.fromLngLat(point.longitude, point.latitude))
+                    .withIconImage(markerBitmap)
+                    .withData(JsonPrimitive(point.id))
+            }
+        )
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -250,20 +266,6 @@ fun MapScreen(
                         onAddPointAt(clicked.latitude(), clicked.longitude())
                         true
                     })
-                }
-            },
-            update = { mapView ->
-                val manager = annotationManagerRef.value ?: mapView.annotations.createPointAnnotationManager().also {
-                    annotationManagerRef.value = it
-                }
-                manager.deleteAll()
-                points.forEach { point ->
-                    manager.create(
-                        PointAnnotationOptions()
-                            .withPoint(GeoPoint.fromLngLat(point.longitude, point.latitude))
-                            .withIconImage(markerBitmap)
-                            .withData(JsonPrimitive(point.id))
-                    )
                 }
             }
         )
