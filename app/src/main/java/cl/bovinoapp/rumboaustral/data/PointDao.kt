@@ -24,6 +24,10 @@ interface PointDao {
     @Update
     suspend fun update(point: Point)
 
+    // Escribe solo los campos editables; no toca etiquetas ni fecha, que pueden haber cambiado desde que se abrió el editor.
+    @Query("UPDATE points SET name = :name, latitude = :latitude, longitude = :longitude, notes = :notes WHERE id = :id")
+    suspend fun updateDetails(id: Long, name: String, latitude: Double, longitude: Double, notes: String): Int
+
     @Delete
     suspend fun delete(point: Point)
 

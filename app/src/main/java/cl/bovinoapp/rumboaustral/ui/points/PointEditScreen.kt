@@ -156,8 +156,10 @@ fun PointEditScreen(
                         else -> null
                     }
                     if (errorMessage == null && lat != null && lon != null) {
+                        // En un punto existente solo se escriben estos campos; las etiquetas no se tocan.
                         viewModel.savePoint(
-                            Point(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
+                            Point(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes),
+                            onError = { errorMessage = "No se pudo guardar el punto" }
                         ) { onDone() }
                     }
                 },

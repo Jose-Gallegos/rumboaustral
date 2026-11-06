@@ -65,11 +65,15 @@ class PointsViewModel(private val repository: PointsRepository) : ViewModel() {
         lastLocation.value = location
     }
 
+    /**
+     * Crea el punto (id == 0) o actualiza uno existente. En una actualización solo se escriben nombre,
+     * coordenadas y notas: las etiquetas de [point] se ignoran porque pueden estar desactualizadas.
+     */
     fun savePoint(point: Point, onError: (Throwable) -> Unit = {}, onSaved: (Long) -> Unit = {}) {
         viewModelScope.launch {
             val id = try {
                 if (point.id == 0L) repository.save(point) else {
-                    repository.update(point)
+                    check(repository.updateDetails(point) > 0) { "El punto ya no existe" }
                     point.id
                 }
             } catch (e: CancellationException) {
