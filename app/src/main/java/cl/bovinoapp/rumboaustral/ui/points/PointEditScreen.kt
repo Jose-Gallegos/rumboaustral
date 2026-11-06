@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +29,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material3.MaterialTheme
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.data.Point
+import cl.bovinoapp.rumboaustral.geo.distanceMeters
+import cl.bovinoapp.rumboaustral.geo.formatDistance
 import cl.bovinoapp.rumboaustral.geo.isValidLatitude
 import cl.bovinoapp.rumboaustral.geo.isValidLongitude
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
@@ -52,6 +55,8 @@ fun PointEditScreen(
     var longitudeText by remember { mutableStateOf(initialLongitude.toString()) }
     var loadedExisting by remember { mutableStateOf(pointId == 0L) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    val locationFlow = remember(container.locationTracker) { container.locationTracker.observeLocation() }
+    val location by locationFlow.collectAsState(initial = null)
     var original by remember { mutableStateOf<Point?>(null) }
     var pendingNavigation by remember { mutableStateOf<Point?>(null) }
     var saving by remember { mutableStateOf(false) }
@@ -182,7 +187,15 @@ fun PointEditScreen(
                 enabled = !saving,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) {
-                Text("Navegar")
+                val lat = latitudeText.toDoubleOrNull()
+                val lon = longitudeText.toDoubleOrNull()
+                val loc = location
+                val distance = when {
+                    lat == null || lon == null || !isValidLatitude(lat) || !isValidLongitude(lon) -> null
+                    loc == null -> "--"
+                    else -> formatDistance(distanceMeters(loc.latitude, loc.longitude, lat, lon))
+                }
+                Text(if (distance != null) "Navegar · $distance" else "Navegar")
             }
         }
     }
