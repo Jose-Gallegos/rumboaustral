@@ -282,8 +282,10 @@ fun MapScreen(
         }
 
         // Cuadro de navegacion: destino, distancia y flecha (relativa a la orientacion del telefono).
+        // Arriba a la izquierda, bajo la escala de Mapbox, y con margen a la derecha para no tapar la brujula
+        // (arriba a la derecha), que permite volver al norte al tocarla.
         targetPoint?.let { target ->
-            Card(modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp)) {
+            Card(modifier = Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 12.dp, end = 72.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 2.dp)
