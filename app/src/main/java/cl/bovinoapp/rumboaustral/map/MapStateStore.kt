@@ -17,22 +17,50 @@ data class LatLon(val latitude: Double, val longitude: Double)
 class MapStateStore(context: Context) {
     private val prefs = context.getSharedPreferences("map_state", Context.MODE_PRIVATE)
 
-    /** Waypoint hacia el que se esta navegando (null = sin navegacion). Solo en memoria. */
-    val navigationTargetId = MutableStateFlow<Long?>(null)
+    /** Waypoint hacia el que se esta navegando (null = sin navegacion). Persistido en [prefs]. */
+    val navigationTargetId = MutableStateFlow<Long?>(
+        if (prefs.contains(KEY_NAV_ID)) prefs.getLong(KEY_NAV_ID, 0L) else null
+    )
 
-    /** Destino sin guardar (coordenadas del formulario). Solo en memoria; excluyente con [navigationTargetId]. */
-    val temporaryDestination = MutableStateFlow<Point?>(null)
+    /** Destino sin guardar (coordenadas del formulario). Persistido; excluyente con [navigationTargetId]. */
+    val temporaryDestination = MutableStateFlow<Point?>(
+        if (prefs.contains(KEY_TMP_LAT) && prefs.contains(KEY_TMP_LON)) {
+            Point(
+                id = 0L,
+                name = "Destino",
+                latitude = Double.fromBits(prefs.getLong(KEY_TMP_LAT, 0L)),
+                longitude = Double.fromBits(prefs.getLong(KEY_TMP_LON, 0L))
+            )
+        } else null
+    )
+
+    private fun persistNavigation() {
+        val id = navigationTargetId.value
+        val tmp = temporaryDestination.value
+        prefs.edit().apply {
+            if (id != null) putLong(KEY_NAV_ID, id) else remove(KEY_NAV_ID)
+            if (tmp != null) {
+                putLong(KEY_TMP_LAT, tmp.latitude.toBits())
+                putLong(KEY_TMP_LON, tmp.longitude.toBits())
+            } else {
+                remove(KEY_TMP_LAT)
+                remove(KEY_TMP_LON)
+            }
+        }.apply()
+    }
 
     fun navigateToPoint(id: Long) {
         temporaryDestination.value = null
         fittedTargetId = null
         navigationTargetId.value = id
+        persistNavigation()
     }
 
     fun navigateToCoordinates(latitude: Double, longitude: Double) {
         navigationTargetId.value = null
         fittedTargetId = null
         temporaryDestination.value = Point(id = 0L, name = "Destino", latitude = latitude, longitude = longitude)
+        persistNavigation()
     }
 
     /** Termina la navegacion y descarta cualquier destino (guardado o temporal). */
@@ -40,6 +68,7 @@ class MapStateStore(context: Context) {
         navigationTargetId.value = null
         temporaryDestination.value = null
         fittedTargetId = null
+        persistNavigation()
     }
 
     /** Destino para el que ya se encuadro la camara, para no reencuadrar al volver a la pestana. */
@@ -66,5 +95,8 @@ class MapStateStore(context: Context) {
     private companion object {
         const val KEY_LAT = "last_lat"
         const val KEY_LON = "last_lon"
+        const val KEY_NAV_ID = "nav_target_id"
+        const val KEY_TMP_LAT = "nav_tmp_lat"
+        const val KEY_TMP_LON = "nav_tmp_lon"
     }
 }
