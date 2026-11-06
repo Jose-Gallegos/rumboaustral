@@ -1,6 +1,10 @@
 package cl.bovinoapp.rumboaustral.ui.map
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -145,6 +149,19 @@ fun MapScreen(
             }
         )
 
+        // Mira central muy delgada (blanca con borde oscuro para verse sobre cualquier imagen).
+        // Marca el punto exacto donde se creara el waypoint; no intercepta toques.
+        Canvas(modifier = Modifier.align(Alignment.Center).size(32.dp)) {
+            val c = center
+            val arm = size.width / 2f
+            val thin = 1.dp.toPx()
+            val outline = thin * 2.5f
+            for ((stroke, color) in listOf(outline to Color.Black.copy(alpha = 0.6f), thin to Color.White)) {
+                drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), strokeWidth = stroke)
+                drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), strokeWidth = stroke)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -153,10 +170,12 @@ fun MapScreen(
         ) {
         FloatingActionButton(
             onClick = {
-                currentLocation?.let { onAddPointAt(it.latitude, it.longitude) }
+                mapViewRef.value?.mapboxMap?.cameraState?.center?.let {
+                    onAddPointAt(it.latitude(), it.longitude())
+                }
             }
         ) {
-            Icon(Icons.Filled.AddLocation, contentDescription = "Crear waypoint en mi ubicacion")
+            Icon(Icons.Filled.AddLocation, contentDescription = "Crear waypoint en el centro del mapa")
         }
 
         FloatingActionButton(
