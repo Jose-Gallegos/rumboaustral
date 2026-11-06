@@ -1,6 +1,10 @@
 package cl.bovinoapp.rumboaustral.ui.points
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,7 +51,7 @@ import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
 import cl.bovinoapp.rumboaustral.ui.labelsViewModelFactory
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PointEditScreen(
     container: AppContainer,
@@ -221,151 +225,169 @@ fun PointEditScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
         ) {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it; nameEdited = true },
-                label = { Text("Nombre") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = latitudeText,
-                onValueChange = { latitudeText = it },
-                label = { Text("Latitud") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            )
-            OutlinedTextField(
-                value = longitudeText,
-                onValueChange = { longitudeText = it },
-                label = { Text("Longitud") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            )
-            OutlinedTextField(
-                value = notes,
-                onValueChange = { notes = it },
-                label = { Text("Notas") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            )
-            LabelKind.entries.forEach { kind ->
-                LabelSelector(
-                    kind = kind,
-                    labels = allLabels.filter { it.kind == kind },
-                    selectedId = effectiveLabelId(kind),
-                    onSelect = { id ->
-                        selection[kind] = id
-                        touched = touched + kind
-                    },
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-            TextButton(onClick = { showLabels = true }, modifier = Modifier.padding(top = 8.dp)) {
-                Text("Administrar etiquetas")
-            }
-            if (labelsRefreshFailed) {
-                Text(
-                    "No se pudieron actualizar las etiquetas del punto; no se puede guardar hasta reintentar.",
-                    color = MaterialTheme.colorScheme.error
-                )
-                TextButton(enabled = !refreshingLabels, onClick = { refreshLabelsFromDb() }) { Text("Reintentar") }
-            }
-            errorMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
-            }
-            Button(
-                onClick = {
-                    val lat = latitudeText.toDoubleOrNull()
-                    val lon = longitudeText.toDoubleOrNull()
-                    errorMessage = when {
-                        name.isBlank() -> "Ingresa un nombre"
-                        lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
-                        lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
-                        else -> null
-                    }
-                    if (errorMessage == null && lat != null && lon != null) {
-                        viewModel.savePoint(
-                            withSelectedLabels(
-                                Point(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
-                            ),
-                            onError = { errorMessage = "No se pudo guardar el punto" }
-                        ) { onDone() }
-                    }
-                },
-                enabled = canSave,
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+            Column(
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)
             ) {
-                Text("Guardar")
-            }
-            OutlinedButton(
-                onClick = {
-                    val lat = latitudeText.toDoubleOrNull()
-                    val lon = longitudeText.toDoubleOrNull()
-                    errorMessage = when {
-                        lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
-                        lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
-                        else -> null
-                    }
-                    if (errorMessage != null || lat == null || lon == null) return@OutlinedButton
-                    val saved = original
-                    when {
-                        pointId == 0L || saved == null -> onNavigate(0L, lat, lon)
-                        saved.name == name && saved.notes == notes &&
-                            saved.latitude == lat && saved.longitude == lon &&
-                            LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) } ->
-                            onNavigate(pointId, lat, lon)
-                        name.isBlank() -> errorMessage = "Ingresa un nombre para guardar los cambios"
-                        else -> pendingNavigation = withSelectedLabels(
-                            saved.copy(name = name, latitude = lat, longitude = lon, notes = notes)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; nameEdited = true },
+                    label = { Text("Nombre") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = latitudeText,
+                    onValueChange = { latitudeText = it },
+                    label = { Text("Latitud") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
+                OutlinedTextField(
+                    value = longitudeText,
+                    onValueChange = { longitudeText = it },
+                    label = { Text("Longitud") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Notas") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
+                // Las etiquetas saltan de línea en vez de desplazarse: así se ven todas sin deslizar.
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LabelKind.entries.forEach { kind ->
+                        LabelSelector(
+                            kind = kind,
+                            labels = allLabels.filter { it.kind == kind },
+                            selectedId = effectiveLabelId(kind),
+                            onSelect = { id ->
+                                selection[kind] = id
+                                touched = touched + kind
+                            }
                         )
                     }
-                },
-                enabled = canSave,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            ) {
-                val lat = latitudeText.toDoubleOrNull()
-                val lon = longitudeText.toDoubleOrNull()
-                val loc = location
-                val distance = when {
-                    lat == null || lon == null || !isValidLatitude(lat) || !isValidLongitude(lon) -> null
-                    loc == null -> "--"
-                    else -> formatDistance(distanceMeters(loc.latitude, loc.longitude, lat, lon))
+                    TextButton(onClick = { showLabels = true }) {
+                        Text("Administrar etiquetas")
+                    }
                 }
-                Text(if (distance != null) "Navegar · $distance" else "Navegar")
+                if (labelsRefreshFailed) {
+                    Text(
+                        "No se pudieron actualizar las etiquetas del punto; no se puede guardar hasta reintentar.",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(enabled = !refreshingLabels, onClick = { refreshLabelsFromDb() }) { Text("Reintentar") }
+                }
             }
-            OutlinedButton(
-                onClick = {
-                    val lat = latitudeText.toDoubleOrNull()
-                    val lon = longitudeText.toDoubleOrNull()
-                    errorMessage = when {
-                        lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
-                        lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
-                        else -> null
+            // Acciones fijas: el formulario se desplaza sin ocultarlas.
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                errorMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = {
+                            val lat = latitudeText.toDoubleOrNull()
+                            val lon = longitudeText.toDoubleOrNull()
+                            errorMessage = when {
+                                name.isBlank() -> "Ingresa un nombre"
+                                lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
+                                lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
+                                else -> null
+                            }
+                            if (errorMessage == null && lat != null && lon != null) {
+                                viewModel.savePoint(
+                                    withSelectedLabels(
+                                        Point(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
+                                    ),
+                                    onError = { errorMessage = "No se pudo guardar el punto" }
+                                ) { onDone() }
+                            }
+                        },
+                        enabled = canSave,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Guardar")
                     }
-                    if (errorMessage != null || lat == null || lon == null) return@OutlinedButton
-                    val saved = original
-                    val dirty = if (pointId == 0L || saved == null) {
-                        // Punto nuevo: hay algo que perder si se escribió o eligió algo, o se cambiaron las coordenadas.
-                        nameEdited || notes.isNotBlank() || touched.isNotEmpty() ||
-                            lat != initialLatitude || lon != initialLongitude
-                    } else {
-                        !(saved.name == name && saved.notes == notes &&
-                            saved.latitude == lat && saved.longitude == lon &&
-                            LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) })
+                    OutlinedButton(
+                        onClick = {
+                            val lat = latitudeText.toDoubleOrNull()
+                            val lon = longitudeText.toDoubleOrNull()
+                            errorMessage = when {
+                                lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
+                                lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
+                                else -> null
+                            }
+                            if (errorMessage != null || lat == null || lon == null) return@OutlinedButton
+                            val saved = original
+                            when {
+                                pointId == 0L || saved == null -> onNavigate(0L, lat, lon)
+                                saved.name == name && saved.notes == notes &&
+                                    saved.latitude == lat && saved.longitude == lon &&
+                                    LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) } ->
+                                    onNavigate(pointId, lat, lon)
+                                name.isBlank() -> errorMessage = "Ingresa un nombre para guardar los cambios"
+                                else -> pendingNavigation = withSelectedLabels(
+                                    saved.copy(name = name, latitude = lat, longitude = lon, notes = notes)
+                                )
+                            }
+                        },
+                        enabled = canSave,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        val lat = latitudeText.toDoubleOrNull()
+                        val lon = longitudeText.toDoubleOrNull()
+                        val loc = location
+                        val distance = when {
+                            lat == null || lon == null || !isValidLatitude(lat) || !isValidLongitude(lon) -> null
+                            loc == null -> "--"
+                            else -> formatDistance(distanceMeters(loc.latitude, loc.longitude, lat, lon))
+                        }
+                        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                            Text("Navegar")
+                            distance?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                        }
                     }
-                    if (!dirty) {
-                        onMeasure(name.ifBlank { "Punto sin nombre" }, lat, lon)
-                    } else {
-                        pendingMeasure = withSelectedLabels(
-                            (saved ?: Point(id = 0L, name = name, latitude = lat, longitude = lon))
-                                .copy(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
-                        )
+                    OutlinedButton(
+                        onClick = {
+                            val lat = latitudeText.toDoubleOrNull()
+                            val lon = longitudeText.toDoubleOrNull()
+                            errorMessage = when {
+                                lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
+                                lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
+                                else -> null
+                            }
+                            if (errorMessage != null || lat == null || lon == null) return@OutlinedButton
+                            val saved = original
+                            val dirty = if (pointId == 0L || saved == null) {
+                                // Punto nuevo: hay algo que perder si se escribió o eligió algo, o se cambiaron las coordenadas.
+                                nameEdited || notes.isNotBlank() || touched.isNotEmpty() ||
+                                    lat != initialLatitude || lon != initialLongitude
+                            } else {
+                                !(saved.name == name && saved.notes == notes &&
+                                    saved.latitude == lat && saved.longitude == lon &&
+                                    LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) })
+                            }
+                            if (!dirty) {
+                                onMeasure(name.ifBlank { "Punto sin nombre" }, lat, lon)
+                            } else {
+                                pendingMeasure = withSelectedLabels(
+                                    (saved ?: Point(id = 0L, name = name, latitude = lat, longitude = lon))
+                                        .copy(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
+                                )
+                            }
+                        },
+                        enabled = canSave,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Medir")
                     }
-                },
-                enabled = canSave,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            ) {
-                Text("Medir desde aquí")
+                }
             }
         }
     }

@@ -1,7 +1,6 @@
 package cl.bovinoapp.rumboaustral.ui.labels
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -29,7 +28,7 @@ fun LabelSelector(
     var open by remember { mutableStateOf(false) }
     val selected = labels.firstOrNull { it.id == selectedId }
     Box(modifier = modifier) {
-        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { open = true }) {
             selected?.let { ColorDot(it.color, 14) }
             Text("${kind.displayName}: ${selected?.name ?: "Sin etiqueta"}", modifier = Modifier.padding(start = if (selected != null) 8.dp else 0.dp))
         }
