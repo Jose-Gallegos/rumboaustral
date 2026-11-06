@@ -1,6 +1,16 @@
 package cl.bovinoapp.rumboaustral.ui.nav
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.SystemClock
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Map
@@ -32,6 +42,12 @@ private const val ROUTE_POINTS = "puntos"
 private const val ROUTE_DOWNLOADS = "descargas"
 private const val ROUTE_POINT_EDIT = "punto/editar?pointId={pointId}&lat={lat}&lon={lon}"
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 private data class BottomTab(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 private val bottomTabs = listOf(
@@ -43,6 +59,20 @@ private val bottomTabs = listOf(
 @Composable
 fun AppNavHost(container: AppContainer) {
     val navController = rememberNavController()
+
+    // Salir con doble Atras solo desde el mapa (raiz); en el resto Atras conserva su funcion habitual.
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val context = LocalContext.current
+    var lastBackMillis by remember { mutableLongStateOf(0L) }
+    BackHandler(enabled = currentEntry?.destination?.route == ROUTE_MAP) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBackMillis <= 2_000L) {
+            context.findActivity()?.finish()
+        } else {
+            lastBackMillis = now
+            Toast.makeText(context, "Presiona Atrás otra vez para salir", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         bottomBar = {
