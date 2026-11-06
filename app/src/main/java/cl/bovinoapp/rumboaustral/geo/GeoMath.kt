@@ -30,6 +30,17 @@ fun initialBearingDegrees(lat1: Double, lon1: Double, lat2: Double, lon2: Double
     return (Math.toDegrees(theta) + 360.0) % 360.0
 }
 
+/** Punto al que se llega avanzando [distanceMeters] desde (lat, lon) con rumbo [bearingDegrees]. Devuelve (lat, lon). */
+fun destinationPoint(lat: Double, lon: Double, bearingDegrees: Double, distanceMeters: Double): Pair<Double, Double> {
+    val delta = distanceMeters / EARTH_RADIUS_METERS
+    val theta = Math.toRadians(bearingDegrees)
+    val phi1 = Math.toRadians(lat)
+    val lambda1 = Math.toRadians(lon)
+    val phi2 = kotlin.math.asin(sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta))
+    val lambda2 = lambda1 + atan2(sin(theta) * sin(delta) * cos(phi1), cos(delta) - sin(phi1) * sin(phi2))
+    return Math.toDegrees(phi2) to Math.toDegrees(lambda2)
+}
+
 /** Normaliza un angulo a el rango [0, 360). */
 fun normalizeDegrees(degrees: Double): Double = ((degrees % 360.0) + 360.0) % 360.0
 

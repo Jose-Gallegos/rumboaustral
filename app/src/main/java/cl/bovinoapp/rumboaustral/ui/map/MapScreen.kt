@@ -47,6 +47,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import cl.bovinoapp.rumboaustral.geo.destinationPoint
 import cl.bovinoapp.rumboaustral.geo.distanceMeters
 import cl.bovinoapp.rumboaustral.geo.formatDistance
 import com.google.gson.JsonPrimitive
@@ -177,6 +178,7 @@ fun MapScreen(
     val temporaryDestination by container.mapStateStore.temporaryDestination.collectAsState()
     val targetPoint = remember(points, targetId) { points.firstOrNull { it.id == targetId } } ?: temporaryDestination
     val polylineManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
+    val courseManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
 
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
@@ -264,6 +266,29 @@ fun MapScreen(
                     .withLineWidth(3.0)
             )
         }
+    }
+
+    // Indicador de dirección de movimiento: segmento corto desde mi posición hacia el curso GPS (solo si me muevo).
+    // Largo fijo en pantalla (~70 px), por eso se recalcula con el zoom (cameraTick).
+    LaunchedEffect(currentLocation, cameraTick.intValue, courseManagerRef.value) {
+        val manager = courseManagerRef.value ?: return@LaunchedEffect
+        manager.deleteAll()
+        val loc = currentLocation ?: return@LaunchedEffect
+        val course = loc.gpsCourseDegrees ?: return@LaunchedEffect
+        val zoom = store.camera?.zoom ?: return@LaunchedEffect
+        val metersPerPixel = 78271.5 * kotlin.math.cos(Math.toRadians(loc.latitude)) / Math.pow(2.0, zoom)
+        val (lat2, lon2) = destinationPoint(loc.latitude, loc.longitude, course.toDouble(), metersPerPixel * 70)
+        manager.create(
+            PolylineAnnotationOptions()
+                .withPoints(
+                    listOf(
+                        GeoPoint.fromLngLat(loc.longitude, loc.latitude),
+                        GeoPoint.fromLngLat(lon2, lat2)
+                    )
+                )
+                .withLineColor("#00E676")
+                .withLineWidth(4.0)
+        )
     }
 
     // Al iniciar la navegacion, encuadra mi ubicacion y el destino (una vez por destino).
@@ -452,6 +477,7 @@ fun MapScreen(
                     scalebar.updateSettings { isMetricUnits = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
+                    courseManagerRef.value = annotations.createPolylineAnnotationManager()
                     // El administrador de marcadores se crea aparte (según el agrupamiento elegido); al crearse
                     // después queda sobre la línea de navegación, igual que antes.
                     gestures.addOnMapClickListener(OnMapClickListener {
