@@ -15,7 +15,10 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.ui.draw.rotate
 import cl.bovinoapp.rumboaustral.ui.navigation.NavigationViewModel
 import cl.bovinoapp.rumboaustral.ui.navigationViewModelFactory
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import cl.bovinoapp.rumboaustral.location.LOCATION_STALE_AFTER_MILLIS
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
 import cl.bovinoapp.rumboaustral.data.UNLABELED_COLOR
@@ -179,6 +182,7 @@ fun MapScreen(
     val targetPoint = remember(points, targetId) { points.firstOrNull { it.id == targetId } } ?: temporaryDestination
     val polylineManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
     val courseManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
+    val courseZoom = remember { mutableDoubleStateOf(-1.0) }
 
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
@@ -270,12 +274,17 @@ fun MapScreen(
 
     // Indicador de dirección de movimiento: segmento corto desde mi posición hacia el curso GPS (solo si me muevo).
     // Largo fijo en pantalla (~70 px), por eso se recalcula con el zoom (cameraTick).
-    LaunchedEffect(currentLocation, cameraTick.intValue, courseManagerRef.value) {
+    // Depende del zoom (redondeado) y no de cameraTick: así redibujar la línea no se realimenta con MapIdle.
+    // Se retira al caducar la ubicación (mismo umbral que el chip GPS), para no mostrar un rumbo viejo.
+    LaunchedEffect(currentLocation, courseZoom.doubleValue, courseManagerRef.value) {
         val manager = courseManagerRef.value ?: return@LaunchedEffect
         manager.deleteAll()
         val loc = currentLocation ?: return@LaunchedEffect
         val course = loc.gpsCourseDegrees ?: return@LaunchedEffect
-        val zoom = store.camera?.zoom ?: return@LaunchedEffect
+        val remaining = loc.timestampMillis + LOCATION_STALE_AFTER_MILLIS - System.currentTimeMillis()
+        if (remaining <= 0) return@LaunchedEffect
+        val zoom = courseZoom.doubleValue
+        if (zoom < 0) return@LaunchedEffect
         val metersPerPixel = 78271.5 * kotlin.math.cos(Math.toRadians(loc.latitude)) / Math.pow(2.0, zoom)
         val (lat2, lon2) = destinationPoint(loc.latitude, loc.longitude, course.toDouble(), metersPerPixel * 70)
         manager.create(
@@ -289,6 +298,8 @@ fun MapScreen(
                 .withLineColor("#00E676")
                 .withLineWidth(4.0)
         )
+        delay(remaining)
+        manager.deleteAll()
     }
 
     // Al iniciar la navegacion, encuadra mi ubicacion y el destino (una vez por destino).
@@ -463,6 +474,8 @@ fun MapScreen(
                         val c = mapboxMap.cameraState
                         store.camera = CameraSnapshot(c.center.latitude(), c.center.longitude(), c.zoom)
                         cameraTick.intValue++
+                        val z = Math.round(c.zoom * 10) / 10.0
+                        if (z != courseZoom.doubleValue) courseZoom.doubleValue = z
                     }
                     // Al quedar quieto el mapa los marcadores ya están dibujados: sondeo final para asentar el resaltado.
                     mapboxMap.subscribeMapIdle { cameraTick.intValue++ }
