@@ -66,8 +66,9 @@ class PointsViewModel(private val repository: PointsRepository) : ViewModel() {
     }
 
     /**
-     * Crea el punto (id == 0) o actualiza uno existente. En una actualización solo se escriben nombre,
-     * coordenadas y notas: las etiquetas de [point] se ignoran porque pueden estar desactualizadas.
+     * Crea el punto (id == 0) o actualiza uno existente. Una actualización escribe nombre, coordenadas,
+     * notas y etiquetas de [point], y conserva la fecha de creación. Quien llama debe pasar solo etiquetas
+     * que existan (si no, la clave foránea rechaza el guardado y se informa por [onError]).
      */
     fun savePoint(point: Point, onError: (Throwable) -> Unit = {}, onSaved: (Long) -> Unit = {}) {
         viewModelScope.launch {

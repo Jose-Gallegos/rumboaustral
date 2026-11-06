@@ -10,12 +10,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class LabelsViewModel(private val repository: LabelsRepository) : ViewModel() {
+    private val _loaded = MutableStateFlow(false)
+    /** false hasta que llega la primera lectura de la base: distingue "cargando" de "sin etiquetas". */
+    val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
     val labels: StateFlow<List<Label>> =
-        repository.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        repository.observeAll()
+            .onEach { _loaded.value = true }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _error = MutableStateFlow<String?>(null)
     /** Mensaje del último error de escritura; la interfaz lo muestra hasta [clearError] o la siguiente operación. */

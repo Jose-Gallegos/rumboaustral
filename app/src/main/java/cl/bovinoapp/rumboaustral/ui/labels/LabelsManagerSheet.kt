@@ -193,7 +193,7 @@ fun LabelsManagerSheet(viewModel: LabelsViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ColorDot(color: Int, sizeDp: Int, selected: Boolean = false, onClick: (() -> Unit)? = null) {
+internal fun ColorDot(color: Int, sizeDp: Int, selected: Boolean = false, onClick: (() -> Unit)? = null) {
     Box(
         modifier = Modifier
             .size(sizeDp.dp)
