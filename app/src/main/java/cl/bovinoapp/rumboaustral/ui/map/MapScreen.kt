@@ -18,9 +18,7 @@ import cl.bovinoapp.rumboaustral.ui.navigationViewModelFactory
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
-import cl.bovinoapp.rumboaustral.data.LabelKind
 import cl.bovinoapp.rumboaustral.data.UNLABELED_COLOR
-import cl.bovinoapp.rumboaustral.data.labelIdFor
 import com.mapbox.maps.QueriedRenderedFeature
 import com.mapbox.maps.RenderedQueryGeometry
 import com.mapbox.maps.RenderedQueryOptions
@@ -358,7 +356,7 @@ fun MapScreen(
         }
     }
 
-    // Texto del resaltado: "Nombre - 420 m" (la distancia solo si hay GPS) y debajo las etiquetas del punto.
+    // Texto del resaltado: "Nombre - 420 m" (solo el nombre si no hay GPS).
     val crosshairPoint = remember(crosshairTarget.value, points) {
         crosshairTarget.value?.let { target -> points.firstOrNull { it.id == target.pointId } }
     }
@@ -366,10 +364,7 @@ fun MapScreen(
         val distance = currentLocation?.let {
             formatDistance(distanceMeters(it.latitude, it.longitude, point.latitude, point.longitude))
         }
-        val labelNames = LabelKind.entries.mapNotNull { kind -> point.labelIdFor(kind)?.let { id -> allLabels.firstOrNull { it.id == id }?.name } }
-        val second = labelNames.joinToString(" · ")
-        listOfNotNull(if (distance != null) "${point.name} - $distance" else point.name, second.ifEmpty { null })
-            .joinToString("\n")
+        if (distance != null) "${point.name} - $distance" else point.name
     }
     val highlightManager = highlightManagerRef.value
     LaunchedEffect(crosshairPoint?.id, crosshairText, highlightManager, markers) {
