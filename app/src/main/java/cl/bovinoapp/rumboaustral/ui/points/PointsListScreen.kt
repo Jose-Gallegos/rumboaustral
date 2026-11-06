@@ -44,7 +44,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.geo.formatDistance
+import androidx.compose.material.icons.filled.FilterList
+import cl.bovinoapp.rumboaustral.ui.labels.LabelTags
 import cl.bovinoapp.rumboaustral.ui.labels.LabelsManagerSheet
+import cl.bovinoapp.rumboaustral.ui.labels.PointFilterSheet
 import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
 import cl.bovinoapp.rumboaustral.ui.labelsViewModelFactory
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
@@ -69,6 +72,23 @@ fun PointsListScreen(
     val labelsViewModel: LabelsViewModel = viewModel(factory = labelsViewModelFactory(container))
     var showLabels by remember { mutableStateOf(false) }
     if (showLabels) LabelsManagerSheet(labelsViewModel, onDismiss = { showLabels = false })
+
+    val filter by viewModel.filter.collectAsState()
+    val allLabels by viewModel.labels.collectAsState()
+    val totalCount by viewModel.totalCount.collectAsState()
+    var showFilters by remember { mutableStateOf(false) }
+    if (showFilters) {
+        PointFilterSheet(
+            filter = filter,
+            labels = allLabels,
+            shown = items.size,
+            total = totalCount,
+            onToggle = viewModel::toggleFilter,
+            onColorBy = viewModel::setColorBy,
+            onClear = viewModel::clearFilter,
+            onDismiss = { showFilters = false }
+        )
+    }
 
     val context = LocalContext.current
     val importPreview by viewModel.importPreview.collectAsState()
@@ -148,13 +168,27 @@ fun PointsListScreen(
                     Text("Exportar GPX", modifier = Modifier.padding(start = 8.dp))
                 }
             }
-            OutlinedButton(
-                onClick = { showLabels = true },
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
             ) {
-                Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null)
-                Text("Etiquetas", modifier = Modifier.padding(start = 8.dp))
+                OutlinedButton(onClick = { showLabels = true }) {
+                    Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null)
+                    Text("Etiquetas", modifier = Modifier.padding(start = 8.dp))
+                }
+                OutlinedButton(onClick = { showFilters = true }) {
+                    Icon(Icons.Filled.FilterList, contentDescription = null)
+                    Text(
+                        if (filter.isActive) "Filtros (${filter.activeKinds})" else "Filtros",
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
             }
+            Text(
+                if (items.size != totalCount) "${items.size} de $totalCount puntos" else "$totalCount puntos",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)
+            )
             LazyColumn {
                 items(items, key = { it.point.id }) { item ->
                     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -162,6 +196,7 @@ fun PointsListScreen(
                             Text(item.point.name, style = MaterialTheme.typography.titleMedium)
                             val distanceText = item.distanceMeters?.let { formatDistance(it) } ?: "Distancia desconocida"
                             Text(distanceText, style = MaterialTheme.typography.bodyMedium)
+                            LabelTags(item.labels, modifier = Modifier.padding(top = 2.dp))
                             if (item.point.notes.isNotBlank()) {
                                 Text(item.point.notes, style = MaterialTheme.typography.bodySmall)
                             }

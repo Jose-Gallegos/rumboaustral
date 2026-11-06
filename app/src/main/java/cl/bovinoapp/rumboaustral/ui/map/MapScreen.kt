@@ -61,6 +61,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.map.CameraSnapshot
 import cl.bovinoapp.rumboaustral.map.LatLon
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import cl.bovinoapp.rumboaustral.ui.labels.PointFilterSheet
 import cl.bovinoapp.rumboaustral.ui.mapViewModelFactory
 import com.mapbox.geojson.Point as GeoPoint
 import com.mapbox.maps.CameraOptions
@@ -92,6 +96,10 @@ fun MapScreen(
     val viewModel: MapViewModel = viewModel(factory = mapViewModelFactory(container))
     val currentLocation by viewModel.location.collectAsState()
     val points by viewModel.points.collectAsState()
+    val markers by viewModel.markers.collectAsState()
+    val filter by viewModel.filter.collectAsState()
+    val allLabels by viewModel.labels.collectAsState()
+    val showFilters = remember { mutableStateOf(false) }
 
     // Navegacion hacia un waypoint: el destino vive en el store para poder fijarlo desde la lista de Puntos.
     val navViewModel: NavigationViewModel = viewModel(factory = navigationViewModelFactory(container))
@@ -108,7 +116,8 @@ fun MapScreen(
 
     val annotationManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
-    val markerBitmap = remember { createPointMarkerBitmap() }
+    // Un bitmap por color distinto (pocos: uno por etiqueta de la categoría elegida más el gris de "sin etiqueta").
+    val markerBitmaps = remember { HashMap<Int, android.graphics.Bitmap>() }
 
     val store = container.mapStateStore
     val map = mapViewRef.value?.mapboxMap
@@ -200,18 +209,18 @@ fun MapScreen(
         }
     }
 
-    // Los marcadores se recrean solo cuando cambia la lista de puntos (no en cada fix de GPS ni
+    // Los marcadores se recrean solo cuando cambian los puntos visibles o sus colores (no en cada fix de GPS ni
     // recomposicion), y en un unico lote: con cientos de waypoints hacerlo por punto es muy lento.
     val annotationManager = annotationManagerRef.value
-    LaunchedEffect(points, annotationManager) {
+    LaunchedEffect(markers, annotationManager) {
         val manager = annotationManager ?: return@LaunchedEffect
         manager.deleteAll()
         manager.create(
-            points.map { point ->
+            markers.map { marker ->
                 PointAnnotationOptions()
-                    .withPoint(GeoPoint.fromLngLat(point.longitude, point.latitude))
-                    .withIconImage(markerBitmap)
-                    .withData(JsonPrimitive(point.id))
+                    .withPoint(GeoPoint.fromLngLat(marker.longitude, marker.latitude))
+                    .withIconImage(markerBitmaps.getOrPut(marker.color) { createPointMarkerBitmap(fillColor = marker.color) })
+                    .withData(JsonPrimitive(marker.id))
             }
         )
     }
@@ -328,6 +337,19 @@ fun MapScreen(
             }
         }
 
+        if (showFilters.value) {
+            PointFilterSheet(
+                filter = filter,
+                labels = allLabels,
+                shown = markers.size,
+                total = points.size,
+                onToggle = viewModel::toggleFilter,
+                onColorBy = viewModel::setColorBy,
+                onClear = viewModel::clearFilter,
+                onDismiss = { showFilters.value = false }
+            )
+        }
+
         pointToDelete.value?.let { point ->
             AlertDialog(
                 onDismissRequest = { pointToDelete.value = null },
@@ -404,6 +426,12 @@ fun MapScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+        FloatingActionButton(onClick = { showFilters.value = true }) {
+            BadgedBox(badge = { if (filter.isActive) Badge { Text("${filter.activeKinds}") } }) {
+                Icon(Icons.Filled.FilterList, contentDescription = "Filtros y colores")
+            }
+        }
+
         FloatingActionButton(
             onClick = {
                 mapViewRef.value?.mapboxMap?.cameraState?.center?.let {

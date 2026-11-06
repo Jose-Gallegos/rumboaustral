@@ -2,8 +2,16 @@ package cl.bovinoapp.rumboaustral.ui.points
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cl.bovinoapp.rumboaustral.data.Label
+import cl.bovinoapp.rumboaustral.data.LabelKind
+import cl.bovinoapp.rumboaustral.data.LabelsRepository
 import cl.bovinoapp.rumboaustral.data.Point
+import cl.bovinoapp.rumboaustral.data.PointFilter
+import cl.bovinoapp.rumboaustral.data.PointFilterStore
 import cl.bovinoapp.rumboaustral.data.PointsRepository
+import cl.bovinoapp.rumboaustral.data.filteredBy
+import cl.bovinoapp.rumboaustral.data.labelIdFor
+import kotlinx.coroutines.flow.map
 import cl.bovinoapp.rumboaustral.geo.distanceMeters
 import cl.bovinoapp.rumboaustral.gpx.GpxIo
 import cl.bovinoapp.rumboaustral.gpx.ImportFormatException
@@ -27,7 +35,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class PointListItem(val point: Point, val distanceMeters: Double?)
+/** [labels] son las etiquetas del punto (Tipo, Estado, Zona) en ese orden, sin las categorías sin asignar. */
+data class PointListItem(val point: Point, val distanceMeters: Double?, val labels: List<Label> = emptyList())
 
 /** Vista previa de una importacion: [selected] son indices de [plan].candidates. */
 data class ImportPreview(
@@ -36,26 +45,53 @@ data class ImportPreview(
     val selected: Set<Int>
 )
 
-class PointsViewModel(private val repository: PointsRepository) : ViewModel() {
+class PointsViewModel(
+    private val repository: PointsRepository,
+    labelsRepository: LabelsRepository,
+    private val filterStore: PointFilterStore
+) : ViewModel() {
     private val query = MutableStateFlow("")
     private val lastLocation = MutableStateFlow<LocationState?>(null)
 
     val items: StateFlow<List<PointListItem>> = combine(
         repository.observeAll(),
         query,
-        lastLocation
-    ) { points, text, location ->
+        lastLocation,
+        labelsRepository.observeAll(),
+        filterStore.filter
+    ) { points, text, location, labels, filter ->
+        val labelsById = labels.associateBy { it.id }
         points
+            .filteredBy(filter, labels)
             .filter { text.isBlank() || it.name.contains(text, ignoreCase = true) }
             .map { point ->
                 val distance = location?.let {
                     distanceMeters(it.latitude, it.longitude, point.latitude, point.longitude)
                 }
-                PointListItem(point, distance)
+                val pointLabels = LabelKind.entries.mapNotNull { kind -> point.labelIdFor(kind)?.let { labelsById[it] } }
+                PointListItem(point, distance, pointLabels)
             }
             .sortedWith(compareBy(nullsLast()) { it.distanceMeters })
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Cantidad total de puntos, sin filtros ni búsqueda, para mostrar "X de Y". */
+    val totalCount: StateFlow<Int> = repository.observeAll().map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    val labels: StateFlow<List<Label>> = labelsRepository.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Filtro vigente, sin etiquetas que ya no existen. */
+    val filter: StateFlow<PointFilter> = combine(filterStore.filter, labelsRepository.observeAll()) { filter, labels ->
+        filter.pruned(labels)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PointFilter())
+
+    fun toggleFilter(kind: LabelKind, labelId: Long) = filterStore.toggle(kind, labelId)
+
+    fun setColorBy(kind: LabelKind) = filterStore.setColorBy(kind)
+
+    fun clearFilter() = filterStore.clear()
 
     fun setQuery(text: String) {
         query.value = text

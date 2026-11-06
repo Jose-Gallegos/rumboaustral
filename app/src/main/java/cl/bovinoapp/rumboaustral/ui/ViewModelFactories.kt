@@ -10,11 +10,20 @@ import cl.bovinoapp.rumboaustral.ui.navigation.NavigationViewModel
 import cl.bovinoapp.rumboaustral.ui.points.PointsViewModel
 
 fun mapViewModelFactory(container: AppContainer) = viewModelFactory {
-    initializer { MapViewModel(container.pointsRepository, container.locationTracker) }
+    initializer {
+        MapViewModel(
+            container.pointsRepository,
+            container.labelsRepository,
+            container.pointFilterStore,
+            container.locationTracker
+        )
+    }
 }
 
 fun pointsViewModelFactory(container: AppContainer) = viewModelFactory {
-    initializer { PointsViewModel(container.pointsRepository) }
+    initializer {
+        PointsViewModel(container.pointsRepository, container.labelsRepository, container.pointFilterStore)
+    }
 }
 
 fun labelsViewModelFactory(container: AppContainer) = viewModelFactory {
