@@ -1,6 +1,10 @@
 package cl.bovinoapp.rumboaustral.ui.map
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import cl.bovinoapp.rumboaustral.data.Point
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -98,6 +102,7 @@ fun MapScreen(
 
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
+    val pointToDelete = remember { mutableStateOf<Point?>(null) }
     val selectedPoint = points.firstOrNull { it.id == selectedPointId.value }
 
     val annotationManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
@@ -321,6 +326,28 @@ fun MapScreen(
             }
         }
 
+        pointToDelete.value?.let { point ->
+            AlertDialog(
+                onDismissRequest = { pointToDelete.value = null },
+                title = { Text("Eliminar waypoint") },
+                text = { Text("¿Eliminar \"${point.name}\"? Esta acción no se puede deshacer.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.deletePoint(point)
+                        selectedPointId.value = null
+                        if (store.navigationTargetId.value == point.id) {
+                            store.navigationTargetId.value = null
+                            store.fittedTargetId = null
+                        }
+                        pointToDelete.value = null
+                    }) { Text("Eliminar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pointToDelete.value = null }) { Text("Cancelar") }
+                }
+            )
+        }
+
         selectedPoint?.let { point ->
             Card(
                 modifier = Modifier
@@ -360,6 +387,9 @@ fun MapScreen(
                         }
                         IconButton(onClick = { onEditPoint(point.id) }) {
                             Icon(Icons.Filled.Edit, contentDescription = "Editar")
+                        }
+                        IconButton(onClick = { pointToDelete.value = point }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
                         }
                         IconButton(onClick = { selectedPointId.value = null }) {
                             Icon(Icons.Filled.Close, contentDescription = "Cerrar")

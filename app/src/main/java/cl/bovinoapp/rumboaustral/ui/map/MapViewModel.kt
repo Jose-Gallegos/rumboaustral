@@ -21,6 +21,10 @@ class MapViewModel(
     val points: StateFlow<List<Point>> = pointsRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    fun deletePoint(point: Point) {
+        viewModelScope.launch { pointsRepository.delete(point) }
+    }
+
     fun saveNewPoint(name: String, latitude: Double, longitude: Double, notes: String = "") {
         viewModelScope.launch {
             pointsRepository.save(Point(name = name, latitude = latitude, longitude = longitude, notes = notes))
