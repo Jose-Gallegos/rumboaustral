@@ -98,6 +98,8 @@ import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.maps.plugin.gestures.OnMapLongClickListener
 import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.gestures
+import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.scalebar.scalebar
 
@@ -439,7 +441,13 @@ fun MapScreen(
                     }
                     // Al quedar quieto el mapa los marcadores ya están dibujados: sondeo final para asentar el resaltado.
                     mapboxMap.subscribeMapIdle { cameraTick.intValue++ }
-                    location.updateSettings { enabled = true }
+                    // Punto de mi posición con una flecha que indica hacia dónde mira el teléfono (brújula).
+                    location.updateSettings {
+                        enabled = true
+                        locationPuck = createDefault2DPuck(withBearing = true)
+                        puckBearingEnabled = true
+                        puckBearing = PuckBearing.HEADING
+                    }
                     // Mapbox elige las unidades según la región del teléfono (aquí salía en ft y millas): siempre métrica.
                     scalebar.updateSettings { isMetricUnits = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
