@@ -162,6 +162,7 @@ fun MapScreen(
 ) {
     val viewModel: MapViewModel = viewModel(factory = mapViewModelFactory(container))
     val currentLocation by viewModel.location.collectAsState()
+    val satellites by viewModel.satellites.collectAsState()
     val points by viewModel.points.collectAsState()
     val markers by viewModel.markers.collectAsState()
     val filter by viewModel.filter.collectAsState()
@@ -458,6 +459,13 @@ fun MapScreen(
                     })
                 }
             }
+        )
+
+        // Estado del GPS arriba al centro: entre la escala (izquierda) y la brújula (derecha) de Mapbox.
+        GpsStatusChip(
+            location = currentLocation,
+            satellites = satellites,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
         )
 
         // Mira central muy delgada (blanca con borde oscuro para verse sobre cualquier imagen).

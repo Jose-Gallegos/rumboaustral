@@ -13,6 +13,7 @@ import cl.bovinoapp.rumboaustral.data.UNLABELED_COLOR
 import cl.bovinoapp.rumboaustral.data.filteredBy
 import cl.bovinoapp.rumboaustral.data.labelIdFor
 import cl.bovinoapp.rumboaustral.location.LocationState
+import cl.bovinoapp.rumboaustral.location.SatelliteStatus
 import cl.bovinoapp.rumboaustral.location.LocationTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +33,10 @@ class MapViewModel(
     locationTracker: LocationTracker
 ) : ViewModel() {
     val location: StateFlow<LocationState?> = locationTracker.observeLocation()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Satélites visibles y usados; null mientras no hay datos (o si el equipo no los expone). */
+    val satellites: StateFlow<SatelliteStatus?> = locationTracker.observeSatellites()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Todos los puntos, sin filtrar: sirven para resolver el destino y el punto seleccionado. */
