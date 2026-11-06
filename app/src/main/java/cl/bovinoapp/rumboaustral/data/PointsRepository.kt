@@ -14,6 +14,6 @@ class PointsRepository(private val dao: PointDao) {
     suspend fun delete(point: Point) = dao.delete(point)
 
     suspend fun importAll(points: List<Point>) {
-        points.forEach { dao.insert(it) }
+        dao.insertAll(points)
     }
 }

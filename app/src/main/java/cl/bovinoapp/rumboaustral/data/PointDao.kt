@@ -18,6 +18,9 @@ interface PointDao {
     @Insert
     suspend fun insert(point: Point): Long
 
+    @Insert
+    suspend fun insertAll(points: List<Point>)
+
     @Update
     suspend fun update(point: Point)
 

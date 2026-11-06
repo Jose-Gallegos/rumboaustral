@@ -1,5 +1,9 @@
 package cl.bovinoapp.rumboaustral.ui.points
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,14 +16,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
@@ -52,7 +61,42 @@ fun PointsListScreen(
         location?.let { viewModel.updateLocation(it) }
     }
 
+    val context = LocalContext.current
+    val importPreview by viewModel.importPreview.collectAsState()
+    val saving by viewModel.saving.collectAsState()
+    val importing by viewModel.importing.collectAsState()
+    val message by viewModel.message.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(message) {
+        message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeMessage()
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            val resolver = context.contentResolver
+            val fileName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            } ?: uri.lastPathSegment ?: "archivo"
+            viewModel.loadImportPreview(fileName) { resolver.openInputStream(uri) }
+        }
+    }
+
+    importPreview?.let { preview ->
+        ImportPreviewDialog(
+            preview = preview,
+            saving = saving,
+            onToggle = viewModel::toggleImportCandidate,
+            onSelect = viewModel::selectImportCandidates,
+            onConfirm = viewModel::confirmImport,
+            onDismiss = viewModel::dismissImportPreview
+        )
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAddPoint) {
                 Icon(Icons.Filled.Add, contentDescription = "Agregar punto")
@@ -67,8 +111,16 @@ fun PointsListScreen(
                     viewModel.setQuery(it)
                 },
                 label = { Text("Buscar punto") },
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp)
             )
+            OutlinedButton(
+                onClick = { filePicker.launch(arrayOf("*/*")) },
+                enabled = !importing,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
+                Icon(Icons.Filled.FileOpen, contentDescription = null)
+                Text(if (importing) "Leyendo archivo…" else "Importar archivo (GPX, KML, KMZ)", modifier = Modifier.padding(start = 8.dp))
+            }
             LazyColumn {
                 items(items, key = { it.point.id }) { item ->
                     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
