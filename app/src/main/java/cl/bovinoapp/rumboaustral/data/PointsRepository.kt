@@ -17,6 +17,20 @@ class PointsRepository(private val dao: PointDao) {
         point.typeLabelId, point.statusLabelId, point.zoneLabelId
     )
 
+    /**
+     * Asigna [labelId] (null = quitar la etiqueta) a [pointIds] en la categoría [kind], pisando lo que tengan.
+     * @return puntos modificados, o null si la etiqueta no existe o es de otra categoría.
+     */
+    suspend fun assignLabel(kind: LabelKind, pointIds: Collection<Long>, labelId: Long?): Int? =
+        dao.assignLabels(kind, listOf(labelId to pointIds.toList()), overwrite = true)
+
+    /**
+     * Aplica un plan de autoclasificación (categoría -> etiqueta -> IDs de puntos) sin pisar etiquetas ya
+     * asignadas, todo o nada. @return puntos modificados; lanza excepción si el plan es inválido.
+     */
+    suspend fun applyAutoClassification(plan: Map<LabelKind, Map<Long, List<Long>>>): Int =
+        dao.autoClassify(plan.mapValues { (_, byLabel) -> byLabel.map { (labelId, ids) -> labelId to ids } })
+
     suspend fun delete(point: Point) = dao.delete(point)
 
     suspend fun importAll(points: List<Point>) {

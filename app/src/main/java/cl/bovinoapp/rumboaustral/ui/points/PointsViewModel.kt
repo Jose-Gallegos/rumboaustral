@@ -2,6 +2,8 @@ package cl.bovinoapp.rumboaustral.ui.points
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cl.bovinoapp.rumboaustral.data.AutoClassifier
+import cl.bovinoapp.rumboaustral.data.AutoClassifyPlan
 import cl.bovinoapp.rumboaustral.data.Label
 import cl.bovinoapp.rumboaustral.data.LabelKind
 import cl.bovinoapp.rumboaustral.data.LabelsRepository
@@ -47,7 +49,7 @@ data class ImportPreview(
 
 class PointsViewModel(
     private val repository: PointsRepository,
-    labelsRepository: LabelsRepository,
+    private val labelsRepository: LabelsRepository,
     private val filterStore: PointFilterStore
 ) : ViewModel() {
     private val query = MutableStateFlow("")
@@ -234,6 +236,118 @@ class PointsViewModel(
 
     fun dismissImportPreview() {
         _importPreview.value = null
+    }
+
+    // --- Selección y asignación masiva de etiquetas ---
+
+    private val rawSelection = MutableStateFlow<Set<Long>>(emptySet())
+
+    /** Puntos seleccionados; descarta los que ya no existen (por ejemplo, borrados mientras se seleccionaba). */
+    val selected: StateFlow<Set<Long>> = combine(rawSelection, repository.observeAll()) { selection, points ->
+        if (selection.isEmpty()) selection else selection intersect points.mapTo(HashSet()) { it.id }
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    fun toggleSelected(id: Long) {
+        rawSelection.update { if (id in it) it - id else it + id }
+    }
+
+    /** Selecciona todos los puntos que muestra la lista ahora (con filtros y búsqueda aplicados). */
+    fun selectAllVisible() {
+        rawSelection.value = items.value.mapTo(HashSet()) { it.point.id }
+    }
+
+    fun clearSelection() {
+        rawSelection.value = emptySet()
+    }
+
+    private val _bulkBusy = MutableStateFlow(false)
+    /** true mientras corre una asignación masiva o una autoclasificación. */
+    val bulkBusy: StateFlow<Boolean> = _bulkBusy
+
+    /**
+     * Asigna [labelId] (null = quitar etiqueta) en la categoría [kind] a los puntos seleccionados.
+     * [onSuccess] solo se llama si se aplicó; si falla se informa por [message] y no se cierra nada.
+     */
+    fun assignLabelToSelected(kind: LabelKind, labelId: Long?, onSuccess: () -> Unit) {
+        val ids = selected.value
+        if (ids.isEmpty() || _bulkBusy.value) return
+        _bulkBusy.value = true
+        viewModelScope.launch {
+            try {
+                val changed = repository.assignLabel(kind, ids, labelId)
+                if (changed == null) {
+                    _message.value = "No se pudo asignar: la etiqueta ya no existe"
+                } else {
+                    _message.value = if (changed == 1) "Etiqueta asignada a 1 punto" else "Etiqueta asignada a $changed puntos"
+                    onSuccess()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _message.value = "No se pudo asignar la etiqueta"
+            } finally {
+                _bulkBusy.value = false
+            }
+        }
+    }
+
+    // --- Autoclasificación por nombre ---
+
+    private val _autoPlan = MutableStateFlow<AutoClassifyPlan?>(null)
+    /** Plan propuesto, pendiente de confirmar (null = sin plan). */
+    val autoPlan: StateFlow<AutoClassifyPlan?> = _autoPlan
+
+    /** Calcula qué etiquetas se asignarían según el nombre de cada punto; no guarda nada todavía. */
+    fun prepareAutoClassify() {
+        if (_bulkBusy.value) return
+        _bulkBusy.value = true
+        viewModelScope.launch {
+            try {
+                val plan = withContext(Dispatchers.Default) {
+                    AutoClassifier.plan(repository.observeAll().first(), labelsRepository.observeAll().first())
+                }
+                if (plan.assignmentCount == 0 && plan.ambiguous == 0) {
+                    _message.value = "Ningún punto sin etiqueta tiene un nombre que coincida con una etiqueta"
+                } else {
+                    _autoPlan.value = plan
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _message.value = "No se pudo preparar la autoclasificación"
+            } finally {
+                _bulkBusy.value = false
+            }
+        }
+    }
+
+    fun dismissAutoClassify() {
+        if (!_bulkBusy.value) _autoPlan.value = null
+    }
+
+    fun confirmAutoClassify() {
+        val plan = _autoPlan.value ?: return
+        if (_bulkBusy.value) return
+        _bulkBusy.value = true
+        viewModelScope.launch {
+            try {
+                val byKind = plan.perKind
+                    .filter { it.assignments.isNotEmpty() }
+                    .associate { kindPlan -> kindPlan.kind to kindPlan.assignments.mapKeys { it.key.id } }
+                val changed = repository.applyAutoClassification(byKind)
+                _autoPlan.value = null
+                // [changed] cuenta etiquetas asignadas (un punto puede recibir una por categoría), no puntos.
+                _message.value = if (changed == 1) "1 etiqueta asignada" else "$changed etiquetas asignadas"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Es todo o nada: no quedó nada aplicado. El plan sigue abierto para reintentar o cancelar.
+                _message.value = "No se pudo clasificar; no se cambió ningún punto"
+            } finally {
+                _bulkBusy.value = false
+            }
+        }
     }
 
     fun confirmImport() {

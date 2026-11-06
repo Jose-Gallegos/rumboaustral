@@ -44,7 +44,19 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.geo.formatDistance
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
 import cl.bovinoapp.rumboaustral.ui.labels.LabelTags
 import cl.bovinoapp.rumboaustral.ui.labels.LabelsManagerSheet
 import cl.bovinoapp.rumboaustral.ui.labels.PointFilterSheet
@@ -52,6 +64,7 @@ import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
 import cl.bovinoapp.rumboaustral.ui.labelsViewModelFactory
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
 
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun PointsListScreen(
     container: AppContainer,
@@ -87,6 +100,37 @@ fun PointsListScreen(
             onColorBy = viewModel::setColorBy,
             onClear = viewModel::clearFilter,
             onDismiss = { showFilters = false }
+        )
+    }
+
+    // Selección múltiple (pulsación larga) y asignación masiva de etiquetas.
+    val selected by viewModel.selected.collectAsState()
+    val bulkBusy by viewModel.bulkBusy.collectAsState()
+    val autoPlan by viewModel.autoPlan.collectAsState()
+    val selecting = selected.isNotEmpty()
+    var showAssign by remember { mutableStateOf(false) }
+    BackHandler(enabled = selecting) { viewModel.clearSelection() }
+    if (showAssign && selecting) {
+        AssignLabelDialog(
+            selectedCount = selected.size,
+            labels = allLabels,
+            busy = bulkBusy,
+            onApply = { kind, labelId ->
+                // El diálogo se cierra y la selección se limpia solo si se aplicó.
+                viewModel.assignLabelToSelected(kind, labelId) {
+                    showAssign = false
+                    viewModel.clearSelection()
+                }
+            },
+            onDismiss = { showAssign = false }
+        )
+    }
+    autoPlan?.let { plan ->
+        AutoClassifyDialog(
+            plan = plan,
+            busy = bulkBusy,
+            onConfirm = viewModel::confirmAutoClassify,
+            onDismiss = viewModel::dismissAutoClassify
         )
     }
 
@@ -131,8 +175,10 @@ fun PointsListScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddPoint) {
-                Icon(Icons.Filled.Add, contentDescription = "Agregar punto")
+            if (!selecting) {
+                FloatingActionButton(onClick = onAddPoint) {
+                    Icon(Icons.Filled.Add, contentDescription = "Agregar punto")
+                }
             }
         }
     ) { innerPadding ->
@@ -146,7 +192,21 @@ fun PointsListScreen(
                 label = { Text("Buscar punto") },
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp)
             )
-            Row(
+            if (selecting) {
+                // Barra de selección: reemplaza los botones de importar/exportar mientras hay puntos marcados.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    IconButton(onClick = viewModel::clearSelection) {
+                        Icon(Icons.Filled.Close, contentDescription = "Cancelar selección")
+                    }
+                    Text("${selected.size} seleccionados", modifier = Modifier.weight(1f))
+                    TextButton(onClick = viewModel::selectAllVisible) { Text("Todos (${items.size})") }
+                    Button(onClick = { showAssign = true }, enabled = !bulkBusy) { Text("Etiquetar") }
+                }
+            } else Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(horizontal = 16.dp)
             ) {
@@ -168,7 +228,7 @@ fun PointsListScreen(
                     Text("Exportar GPX", modifier = Modifier.padding(start = 8.dp))
                 }
             }
-            Row(
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
             ) {
@@ -183,6 +243,10 @@ fun PointsListScreen(
                         modifier = Modifier.padding(start = 8.dp)
                     )
                 }
+                OutlinedButton(onClick = viewModel::prepareAutoClassify, enabled = !bulkBusy) {
+                    Icon(Icons.Filled.AutoFixHigh, contentDescription = null)
+                    Text(if (bulkBusy) "Procesando…" else "Autoclasificar", modifier = Modifier.padding(start = 8.dp))
+                }
             }
             Text(
                 if (items.size != totalCount) "${items.size} de $totalCount puntos" else "$totalCount puntos",
@@ -191,24 +255,47 @@ fun PointsListScreen(
             )
             LazyColumn {
                 items(items, key = { it.point.id }) { item ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(item.point.name, style = MaterialTheme.typography.titleMedium)
-                            val distanceText = item.distanceMeters?.let { formatDistance(it) } ?: "Distancia desconocida"
-                            Text(distanceText, style = MaterialTheme.typography.bodyMedium)
-                            LabelTags(item.labels, modifier = Modifier.padding(top = 2.dp))
-                            if (item.point.notes.isNotBlank()) {
-                                Text(item.point.notes, style = MaterialTheme.typography.bodySmall)
+                    val isSelected = item.point.id in selected
+                    Card(
+                        colors = if (isSelected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                        else CardDefaults.cardColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .combinedClickable(
+                                onClick = { if (selecting) viewModel.toggleSelected(item.point.id) },
+                                onLongClick = { viewModel.toggleSelected(item.point.id) }
+                            )
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (selecting) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = { viewModel.toggleSelected(item.point.id) },
+                                    modifier = Modifier.padding(start = 4.dp)
+                                )
                             }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                IconButton(onClick = { onNavigateToPoint(item.point.id) }) {
-                                    Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(item.point.name, style = MaterialTheme.typography.titleMedium)
+                                val distanceText = item.distanceMeters?.let { formatDistance(it) } ?: "Distancia desconocida"
+                                Text(distanceText, style = MaterialTheme.typography.bodyMedium)
+                                LabelTags(item.labels, modifier = Modifier.padding(top = 2.dp))
+                                if (item.point.notes.isNotBlank()) {
+                                    Text(item.point.notes, style = MaterialTheme.typography.bodySmall)
                                 }
-                                IconButton(onClick = { onEditPoint(item.point.id) }) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "Editar")
-                                }
-                                IconButton(onClick = { viewModel.deletePoint(item.point) }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                                // Con puntos marcados las acciones individuales se ocultan para no borrar uno por error.
+                                if (!selecting) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        IconButton(onClick = { onNavigateToPoint(item.point.id) }) {
+                                            Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
+                                        }
+                                        IconButton(onClick = { onEditPoint(item.point.id) }) {
+                                            Icon(Icons.Filled.Edit, contentDescription = "Editar")
+                                        }
+                                        IconButton(onClick = { viewModel.deletePoint(item.point) }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                                        }
+                                    }
                                 }
                             }
                         }
