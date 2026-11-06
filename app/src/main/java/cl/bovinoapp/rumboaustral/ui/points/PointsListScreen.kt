@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
@@ -57,6 +58,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
+import cl.bovinoapp.rumboaustral.data.Point
 import cl.bovinoapp.rumboaustral.ui.labels.LabelTags
 import cl.bovinoapp.rumboaustral.ui.labels.LabelsManagerSheet
 import cl.bovinoapp.rumboaustral.ui.labels.PointFilterSheet
@@ -70,6 +72,7 @@ fun PointsListScreen(
     container: AppContainer,
     onEditPoint: (Long) -> Unit,
     onNavigateToPoint: (Long) -> Unit,
+    onMeasureFromPoint: (Point) -> Unit,
     onAddPoint: () -> Unit
 ) {
     val viewModel: PointsViewModel = viewModel(factory = pointsViewModelFactory(container))
@@ -288,6 +291,9 @@ fun PointsListScreen(
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                         IconButton(onClick = { onNavigateToPoint(item.point.id) }) {
                                             Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
+                                        }
+                                        IconButton(onClick = { onMeasureFromPoint(item.point) }) {
+                                            Icon(Icons.Filled.Straighten, contentDescription = "Medir desde aquí")
                                         }
                                         IconButton(onClick = { onEditPoint(item.point.id) }) {
                                             Icon(Icons.Filled.Edit, contentDescription = "Editar")

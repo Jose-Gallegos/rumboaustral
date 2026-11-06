@@ -53,6 +53,9 @@ import androidx.compose.material3.Text
 import cl.bovinoapp.rumboaustral.geo.destinationPoint
 import cl.bovinoapp.rumboaustral.geo.distanceMeters
 import cl.bovinoapp.rumboaustral.geo.formatDistance
+import cl.bovinoapp.rumboaustral.geo.formatBearingWithCardinal
+import cl.bovinoapp.rumboaustral.geo.initialBearingDegrees
+import androidx.compose.material.icons.filled.Straighten
 import com.google.gson.JsonPrimitive
 import com.mapbox.maps.plugin.annotation.generated.OnPointAnnotationClickListener
 import com.mapbox.maps.plugin.gestures.OnMapClickListener
@@ -184,6 +187,12 @@ fun MapScreen(
     val courseManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
     val courseZoom = remember { mutableDoubleStateOf(-1.0) }
 
+    // Medición desde un waypoint hasta la cruz central. El centro se actualiza con la cámara, pero solo se lee
+    // (y por tanto solo recompone) mientras hay una medición activa.
+    val measureOrigin by container.mapStateStore.measureOrigin.collectAsState()
+    val measureManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
+    val cameraCenter = remember { mutableStateOf<LatLon?>(null) }
+
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
     val pointToDelete = remember { mutableStateOf<Point?>(null) }
@@ -270,6 +279,25 @@ fun MapScreen(
                     .withLineWidth(3.0)
             )
         }
+    }
+
+    // Línea entre el origen de la medición y la cruz central, redibujada al mover el mapa.
+    LaunchedEffect(measureOrigin, cameraCenter.value, measureManagerRef.value) {
+        val manager = measureManagerRef.value ?: return@LaunchedEffect
+        manager.deleteAll()
+        val origin = measureOrigin ?: return@LaunchedEffect
+        val center = cameraCenter.value ?: return@LaunchedEffect
+        manager.create(
+            PolylineAnnotationOptions()
+                .withPoints(
+                    listOf(
+                        GeoPoint.fromLngLat(origin.longitude, origin.latitude),
+                        GeoPoint.fromLngLat(center.longitude, center.latitude)
+                    )
+                )
+                .withLineColor("#FFFFFF")
+                .withLineWidth(3.0)
+        )
     }
 
     // Indicador de dirección de movimiento: segmento corto desde mi posición hacia el curso GPS (solo si me muevo).
@@ -407,8 +435,10 @@ fun MapScreen(
     }
     // Al llegar la cruz a un punto distinto, ese punto pasa a ser el seleccionado (como si se tocara). Un toque
     // posterior sobre otro waypoint lo reemplaza, y cerrar el panel funciona aunque la cruz siga encima.
-    LaunchedEffect(crosshairPoint?.id) {
-        crosshairPoint?.let { selectedPointId.value = it.id }
+    // Mientras se mide, la cruz no selecciona: su panel taparía la medición que se está haciendo con ella.
+    val isMeasuring = measureOrigin != null
+    LaunchedEffect(crosshairPoint?.id, isMeasuring) {
+        if (!isMeasuring) crosshairPoint?.let { selectedPointId.value = it.id }
     }
     val highlightManager = highlightManagerRef.value
     // El resaltado sigue al punto seleccionado (bajo la cruz o tocado), igual que el panel.
@@ -474,6 +504,7 @@ fun MapScreen(
                         val c = mapboxMap.cameraState
                         store.camera = CameraSnapshot(c.center.latitude(), c.center.longitude(), c.zoom)
                         cameraTick.intValue++
+                        cameraCenter.value = LatLon(c.center.latitude(), c.center.longitude())
                         val z = Math.round(c.zoom * 10) / 10.0
                         if (z != courseZoom.doubleValue) courseZoom.doubleValue = z
                     }
@@ -491,6 +522,9 @@ fun MapScreen(
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
                     courseManagerRef.value = annotations.createPolylineAnnotationManager()
+                    measureManagerRef.value = annotations.createPolylineAnnotationManager()
+                    // El centro inicial no depende de que la cámara cambie: la medición puede empezar con el mapa quieto.
+                    mapboxMap.cameraState.center.let { cameraCenter.value = LatLon(it.latitude(), it.longitude()) }
                     // El administrador de marcadores se crea aparte (según el agrupamiento elegido); al crearse
                     // después queda sobre la línea de navegación, igual que antes.
                     gestures.addOnMapClickListener(OnMapClickListener {
@@ -575,6 +609,40 @@ fun MapScreen(
                     }
                 }
             }
+            // Medición: distancia y rumbo desde el waypoint de origen hasta la cruz central.
+            measureOrigin?.let { origin ->
+                val center = cameraCenter.value
+                Card {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 2.dp)
+                    ) {
+                        Icon(Icons.Filled.Straighten, contentDescription = null, modifier = Modifier.size(28.dp))
+                        Column(modifier = Modifier.padding(start = 8.dp).widthIn(max = 170.dp)) {
+                            Text(
+                                "Desde ${origin.name}",
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                if (center != null) {
+                                    val meters = distanceMeters(origin.latitude, origin.longitude, center.latitude, center.longitude)
+                                    // Con distancia nula el rumbo no tiene sentido (la cruz está sobre el origen).
+                                    if (meters < 1.0) formatDistance(meters) else {
+                                        val bearing = initialBearingDegrees(origin.latitude, origin.longitude, center.latitude, center.longitude)
+                                        "${formatDistance(meters)} · ${formatBearingWithCardinal(bearing)}"
+                                    }
+                                } else "-- m",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        IconButton(onClick = { store.stopMeasure() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Terminar medición")
+                        }
+                    }
+                }
+            }
         }
 
         if (showFilters.value) {
@@ -641,20 +709,29 @@ fun MapScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    // Cinco botones de 40 dp (200 dp): caben en los ~208 dp que quedan en pantallas de 360 dp,
+                    // con los 48 dp por defecto (240 dp) el último se comprimía.
+                    val buttonSize = Modifier.size(40.dp)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        IconButton(onClick = {
+                        IconButton(modifier = buttonSize, onClick = {
                             store.navigateToPoint(point.id)
                             selectedPointId.value = null
                         }) {
                             Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
                         }
-                        IconButton(onClick = { onEditPoint(point.id) }) {
+                        IconButton(modifier = buttonSize, onClick = {
+                            store.startMeasure(point.name, point.latitude, point.longitude)
+                            selectedPointId.value = null
+                        }) {
+                            Icon(Icons.Filled.Straighten, contentDescription = "Medir desde aquí")
+                        }
+                        IconButton(modifier = buttonSize, onClick = { onEditPoint(point.id) }) {
                             Icon(Icons.Filled.Edit, contentDescription = "Editar")
                         }
-                        IconButton(onClick = { pointToDelete.value = point }) {
+                        IconButton(modifier = buttonSize, onClick = { pointToDelete.value = point }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
                         }
-                        IconButton(onClick = { selectedPointId.value = null }) {
+                        IconButton(modifier = buttonSize, onClick = { selectedPointId.value = null }) {
                             Icon(Icons.Filled.Close, contentDescription = "Cerrar")
                         }
                     }

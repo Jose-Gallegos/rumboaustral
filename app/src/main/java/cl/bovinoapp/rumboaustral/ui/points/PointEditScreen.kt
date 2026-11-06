@@ -1,6 +1,7 @@
 package cl.bovinoapp.rumboaustral.ui.points
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -54,6 +55,8 @@ fun PointEditScreen(
     initialLatitude: Double,
     initialLongitude: Double,
     onDone: () -> Unit,
+    /** Medir desde las coordenadas del formulario (no requiere guardar). */
+    onMeasure: (name: String, lat: Double, lon: Double) -> Unit,
     /** pointId != 0: navegar al waypoint guardado; 0: navegar solo a las coordenadas. */
     onNavigate: (pointId: Long, lat: Double, lon: Double) -> Unit
 ) {
@@ -78,6 +81,8 @@ fun PointEditScreen(
     val location by locationFlow.collectAsState(initial = null)
     var original by remember { mutableStateOf<Point?>(null) }
     var pendingNavigation by remember { mutableStateOf<Point?>(null) }
+    // Formulario con cambios sin guardar al pedir "Medir desde aquí": se pregunta si guardarlos o descartarlos.
+    var pendingMeasure by remember { mutableStateOf<Point?>(null) }
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Guardar antes de tener las etiquetas (o con la selección sin refrescar) las sobrescribiría con null.
@@ -164,6 +169,45 @@ fun PointEditScreen(
             },
             dismissButton = {
                 TextButton(enabled = !saving, onClick = { pendingNavigation = null }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    pendingMeasure?.let { edited ->
+        AlertDialog(
+            onDismissRequest = { if (!saving) pendingMeasure = null },
+            title = { Text("Cambios sin guardar") },
+            text = { Text("Hay cambios sin guardar en el formulario. Si sales a medir sin guardarlos, se perderán.") },
+            confirmButton = {
+                Row {
+                    TextButton(enabled = !saving, onClick = {
+                        pendingMeasure = null
+                        onMeasure(edited.name.ifBlank { "Punto sin nombre" }, edited.latitude, edited.longitude)
+                    }) { Text("Descartar") }
+                    TextButton(enabled = !saving, onClick = {
+                        if (edited.name.isBlank()) {
+                            pendingMeasure = null
+                            errorMessage = "Ingresa un nombre para guardar los cambios"
+                            return@TextButton
+                        }
+                        saving = true
+                        viewModel.savePoint(
+                            edited,
+                            onError = {
+                                saving = false
+                                pendingMeasure = null
+                                errorMessage = "No se pudo guardar; no se inició la medición"
+                            }
+                        ) {
+                            saving = false
+                            pendingMeasure = null
+                            onMeasure(edited.name, edited.latitude, edited.longitude)
+                        }
+                    }) { Text("Guardar") }
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !saving, onClick = { pendingMeasure = null }) { Text("Cancelar") }
             }
         )
     }
@@ -288,6 +332,40 @@ fun PointEditScreen(
                     else -> formatDistance(distanceMeters(loc.latitude, loc.longitude, lat, lon))
                 }
                 Text(if (distance != null) "Navegar · $distance" else "Navegar")
+            }
+            OutlinedButton(
+                onClick = {
+                    val lat = latitudeText.toDoubleOrNull()
+                    val lon = longitudeText.toDoubleOrNull()
+                    errorMessage = when {
+                        lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
+                        lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
+                        else -> null
+                    }
+                    if (errorMessage != null || lat == null || lon == null) return@OutlinedButton
+                    val saved = original
+                    val dirty = if (pointId == 0L || saved == null) {
+                        // Punto nuevo: hay algo que perder si se escribió o eligió algo, o se cambiaron las coordenadas.
+                        nameEdited || notes.isNotBlank() || touched.isNotEmpty() ||
+                            lat != initialLatitude || lon != initialLongitude
+                    } else {
+                        !(saved.name == name && saved.notes == notes &&
+                            saved.latitude == lat && saved.longitude == lon &&
+                            LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) })
+                    }
+                    if (!dirty) {
+                        onMeasure(name.ifBlank { "Punto sin nombre" }, lat, lon)
+                    } else {
+                        pendingMeasure = withSelectedLabels(
+                            (saved ?: Point(id = 0L, name = name, latitude = lat, longitude = lon))
+                                .copy(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
+                        )
+                    }
+                },
+                enabled = canSave,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                Text("Medir desde aquí")
             }
         }
     }

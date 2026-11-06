@@ -140,6 +140,14 @@ fun AppNavHost(container: AppContainer) {
                             restoreState = true
                         }
                     },
+                    onMeasureFromPoint = { point ->
+                        container.mapStateStore.startMeasure(point.name, point.latitude, point.longitude)
+                        navController.navigate(ROUTE_MAP) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onAddPoint = { navController.navigate("punto/editar?pointId=0&lat=0&lon=0") }
                 )
             }
@@ -161,6 +169,15 @@ fun AppNavHost(container: AppContainer) {
                     initialLatitude = args?.getString("lat")?.toDoubleOrNull() ?: 0.0,
                     initialLongitude = args?.getString("lon")?.toDoubleOrNull() ?: 0.0,
                     onDone = { navController.popBackStack() },
+                    onMeasure = { name, lat, lon ->
+                        container.mapStateStore.startMeasure(name, lat, lon)
+                        navController.popBackStack()
+                        navController.navigate(ROUTE_MAP) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onNavigate = { id, lat, lon ->
                         if (id != 0L) container.mapStateStore.navigateToPoint(id)
                         else container.mapStateStore.navigateToCoordinates(lat, lon)

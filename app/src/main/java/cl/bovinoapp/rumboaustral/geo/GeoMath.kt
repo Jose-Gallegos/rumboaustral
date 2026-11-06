@@ -60,6 +60,15 @@ fun formatDistance(meters: Double): String = if (meters >= 1000.0) {
 
 fun formatBearing(degrees: Double): String = "%.0f°".format(normalizeDegrees(degrees))
 
+private val CARDINALS = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
+
+/** Rumbo con su punto cardinal de 8 vientos, p. ej. "135° SE". */
+fun formatBearingWithCardinal(degrees: Double): String {
+    val normalized = normalizeDegrees(degrees)
+    val cardinal = CARDINALS[((normalized + 22.5) / 45.0).toInt() % 8]
+    return "${formatBearing(normalized)} $cardinal"
+}
+
 fun isValidLatitude(latitude: Double): Boolean = latitude.isFinite() && latitude in -90.0..90.0
 
 fun isValidLongitude(longitude: Double): Boolean = longitude.isFinite() && longitude in -180.0..180.0

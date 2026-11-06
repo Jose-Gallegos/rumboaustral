@@ -8,6 +8,8 @@ data class CameraSnapshot(val latitude: Double, val longitude: Double, val zoom:
 
 data class LatLon(val latitude: Double, val longitude: Double)
 
+data class MeasureOrigin(val name: String, val latitude: Double, val longitude: Double)
+
 /**
  * Estado del mapa que debe sobrevivir a la pantalla:
  * - [camera]: posicion y zoom al salir de la pestana (solo en memoria, para restaurarlos al volver).
@@ -33,6 +35,20 @@ class MapStateStore(context: Context) {
             )
         } else null
     )
+
+    /**
+     * Origen de una medición de distancia hacia la cruz central del mapa (null = sin medición). Es temporal: solo
+     * en memoria, a diferencia de la navegación. Guarda las coordenadas (no el ID) para admitir puntos sin guardar.
+     */
+    val measureOrigin = MutableStateFlow<MeasureOrigin?>(null)
+
+    fun startMeasure(name: String, latitude: Double, longitude: Double) {
+        measureOrigin.value = MeasureOrigin(name, latitude, longitude)
+    }
+
+    fun stopMeasure() {
+        measureOrigin.value = null
+    }
 
     /** Si el mapa agrupa los marcadores cercanos en círculos con su cantidad. Elección del usuario, persistida; por defecto no. */
     val clusteringEnabled = MutableStateFlow(prefs.getBoolean(KEY_CLUSTERING, false))
