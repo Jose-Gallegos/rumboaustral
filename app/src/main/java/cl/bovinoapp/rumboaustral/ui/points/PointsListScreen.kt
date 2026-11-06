@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
@@ -43,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.geo.formatDistance
+import cl.bovinoapp.rumboaustral.ui.labels.LabelsManagerSheet
+import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
+import cl.bovinoapp.rumboaustral.ui.labelsViewModelFactory
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
 
 @Composable
@@ -61,6 +65,10 @@ fun PointsListScreen(
     LaunchedEffect(location) {
         location?.let { viewModel.updateLocation(it) }
     }
+
+    val labelsViewModel: LabelsViewModel = viewModel(factory = labelsViewModelFactory(container))
+    var showLabels by remember { mutableStateOf(false) }
+    if (showLabels) LabelsManagerSheet(labelsViewModel, onDismiss = { showLabels = false })
 
     val context = LocalContext.current
     val importPreview by viewModel.importPreview.collectAsState()
@@ -139,6 +147,13 @@ fun PointsListScreen(
                     Icon(Icons.Filled.Share, contentDescription = null)
                     Text("Exportar GPX", modifier = Modifier.padding(start = 8.dp))
                 }
+            }
+            OutlinedButton(
+                onClick = { showLabels = true },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null)
+                Text("Etiquetas", modifier = Modifier.padding(start = 8.dp))
             }
             LazyColumn {
                 items(items, key = { it.point.id }) { item ->

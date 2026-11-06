@@ -22,7 +22,7 @@ interface LabelDao {
     suspend fun insert(label: Label): Long
 
     @Update
-    suspend fun update(label: Label)
+    suspend fun update(label: Label): Int
 
     @Update
     suspend fun updateAll(labels: List<Label>)

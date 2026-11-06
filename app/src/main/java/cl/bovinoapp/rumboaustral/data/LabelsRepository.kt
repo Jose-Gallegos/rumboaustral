@@ -8,7 +8,8 @@ class LabelsRepository(private val dao: LabelDao) {
     suspend fun create(kind: LabelKind, name: String, color: Int): Long =
         dao.insert(Label(kind = kind, name = name.trim(), color = color, sortOrder = dao.maxSortOrder(kind) + 1))
 
-    suspend fun update(label: Label) = dao.update(label.copy(name = label.name.trim()))
+    /** @return false si la etiqueta ya no existe. */
+    suspend fun update(label: Label): Boolean = dao.update(label.copy(name = label.name.trim())) > 0
 
     /** Persiste un nuevo orden: [ordered] son las etiquetas de una categoría en el orden deseado. */
     suspend fun reorder(ordered: List<Label>) =

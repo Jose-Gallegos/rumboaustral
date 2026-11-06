@@ -33,6 +33,9 @@ import cl.bovinoapp.rumboaustral.geo.distanceMeters
 import cl.bovinoapp.rumboaustral.geo.formatDistance
 import cl.bovinoapp.rumboaustral.geo.isValidLatitude
 import cl.bovinoapp.rumboaustral.geo.isValidLongitude
+import cl.bovinoapp.rumboaustral.ui.labels.LabelsManagerSheet
+import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
+import cl.bovinoapp.rumboaustral.ui.labelsViewModelFactory
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,6 +50,10 @@ fun PointEditScreen(
     onNavigate: (pointId: Long, lat: Double, lon: Double) -> Unit
 ) {
     val viewModel: PointsViewModel = viewModel(factory = pointsViewModelFactory(container))
+    val labelsViewModel: LabelsViewModel = viewModel(factory = labelsViewModelFactory(container))
+    var showLabels by remember { mutableStateOf(false) }
+    // Panel inferior: no navega, así que no se pierde lo escrito en el formulario.
+    if (showLabels) LabelsManagerSheet(labelsViewModel, onDismiss = { showLabels = false })
 
     var name by remember { mutableStateOf("") }
     var nameEdited by remember { mutableStateOf(false) }
@@ -142,6 +149,9 @@ fun PointEditScreen(
                 label = { Text("Notas") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             )
+            TextButton(onClick = { showLabels = true }, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Administrar etiquetas")
+            }
             errorMessage?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
             }
