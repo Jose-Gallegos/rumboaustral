@@ -3,7 +3,10 @@ package cl.bovinoapp.rumboaustral.ui.nav
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import androidx.compose.runtime.mutableStateOf
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
@@ -42,6 +45,8 @@ private const val ROUTE_POINTS = "puntos"
 private const val ROUTE_DOWNLOADS = "descargas"
 private const val ROUTE_POINT_EDIT = "punto/editar?pointId={pointId}&lat={lat}&lon={lon}"
 
+private const val EXIT_WINDOW_MILLIS = 2_000L
+
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
@@ -64,13 +69,24 @@ fun AppNavHost(container: AppContainer) {
     val currentEntry by navController.currentBackStackEntryAsState()
     val context = LocalContext.current
     var lastBackMillis by remember { mutableLongStateOf(0L) }
+    val exitToast = remember { mutableStateOf<Toast?>(null) }
+    val handler = remember { Handler(Looper.getMainLooper()) }
     BackHandler(enabled = currentEntry?.destination?.route == ROUTE_MAP) {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastBackMillis <= 2_000L) {
+        if (now - lastBackMillis <= EXIT_WINDOW_MILLIS) {
+            handler.removeCallbacksAndMessages(null)
+            exitToast.value?.cancel()
             context.findActivity()?.finish()
         } else {
             lastBackMillis = now
-            Toast.makeText(context, "Presiona Atrás otra vez para salir", Toast.LENGTH_SHORT).show()
+            exitToast.value?.cancel()
+            val toast = Toast.makeText(context, "Presiona Atrás otra vez para salir", Toast.LENGTH_SHORT)
+            exitToast.value = toast
+            toast.show()
+            // El toast dura mas que la ventana: se retira cuando esta termina, para que
+            // lo visible coincida con el tiempo disponible para el segundo toque.
+            handler.removeCallbacksAndMessages(null)
+            handler.postDelayed({ toast.cancel() }, EXIT_WINDOW_MILLIS)
         }
     }
 
