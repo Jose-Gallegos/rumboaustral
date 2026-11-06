@@ -15,6 +15,22 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.ui.draw.rotate
 import cl.bovinoapp.rumboaustral.ui.navigation.NavigationViewModel
 import cl.bovinoapp.rumboaustral.ui.navigationViewModelFactory
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalDensity
+import cl.bovinoapp.rumboaustral.data.LabelKind
+import cl.bovinoapp.rumboaustral.data.UNLABELED_COLOR
+import cl.bovinoapp.rumboaustral.data.labelIdFor
+import com.mapbox.maps.QueriedRenderedFeature
+import com.mapbox.maps.RenderedQueryGeometry
+import com.mapbox.maps.RenderedQueryOptions
+import com.mapbox.maps.ScreenBox
+import com.mapbox.maps.ScreenCoordinate
+import com.mapbox.maps.extension.style.layers.properties.generated.TextAnchor
+import com.mapbox.maps.extension.style.layers.properties.generated.TextJustify
+import kotlin.coroutines.resume
+import kotlin.math.hypot
+import kotlinx.coroutines.suspendCancellableCoroutine
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.plugin.annotation.AnnotationConfig
 import com.mapbox.maps.plugin.annotation.AnnotationSourceOptions
@@ -91,6 +107,48 @@ private val CLUSTER_COLOR_SMALL = 0xFF455A64.toInt()
 private val CLUSTER_COLOR_MEDIUM = 0xFF37474F.toInt()
 private val CLUSTER_COLOR_LARGE = 0xFF263238.toInt()
 
+/** ID de la capa de símbolos de los marcadores de puntos (los grupos usan capas aparte, con otros IDs). */
+private const val POINTS_LAYER_ID = "rumbo-points-layer"
+
+/** Radio, en dp alrededor de la cruz central, dentro del cual un punto suelto se resalta. */
+private const val CROSSHAIR_RADIUS_DP = 20f
+
+/** Punto resaltado bajo la cruz y cuántos otros puntos sueltos hay dentro del radio. */
+private data class CrosshairTarget(val pointId: Long, val moreCount: Int)
+
+/**
+ * Punto suelto más cercano al centro de la vista (donde está la cruz) dentro de [radiusPx], o null. Consulta solo la
+ * capa de marcadores individuales ([POINTS_LAYER_ID]): los grupos y los puntos ocultos por filtros no aparecen ahí.
+ */
+private suspend fun probeCrosshair(view: MapView, radiusPx: Float): CrosshairTarget? {
+    if (view.width == 0 || view.height == 0) return null
+    val map = view.mapboxMap
+    val cx = view.width / 2.0
+    val cy = view.height / 2.0
+    val box = ScreenBox(ScreenCoordinate(cx - radiusPx, cy - radiusPx), ScreenCoordinate(cx + radiusPx, cy + radiusPx))
+    val features = suspendCancellableCoroutine<List<QueriedRenderedFeature>> { continuation ->
+        try {
+            val handle = map.queryRenderedFeatures(
+                RenderedQueryGeometry(box),
+                RenderedQueryOptions(listOf(POINTS_LAYER_ID), null)
+            ) { result -> if (continuation.isActive) continuation.resume(result.value.orEmpty()) }
+            continuation.invokeOnCancellation { handle.cancel() }
+        } catch (e: Exception) {
+            // Capa aún no creada o estilo sin cargar: sin resaltado por ahora.
+            if (continuation.isActive) continuation.resume(emptyList())
+        }
+    }
+    val hits = features.mapNotNull { queried ->
+        val feature = queried.queriedFeature.feature
+        val geometry = feature.geometry() as? GeoPoint ?: return@mapNotNull null
+        // "custom_data" es donde el plugin guarda el dato que se pasó con withData (aquí, el ID del punto).
+        val id = feature.properties()?.get("custom_data")?.takeIf { it.isJsonPrimitive }?.asLong ?: return@mapNotNull null
+        val pixel = map.pixelForCoordinate(geometry)
+        id to hypot(pixel.x - cx, pixel.y - cy)
+    }.filter { it.second <= radiusPx }.distinctBy { it.first }.sortedBy { it.second }
+    return hits.firstOrNull()?.let { CrosshairTarget(it.first, hits.size - 1) }
+}
+
 private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builder()
     .center(GeoPoint.fromLngLat(longitude, latitude))
     .zoom(15.0)
@@ -127,6 +185,14 @@ fun MapScreen(
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
     // Un bitmap por color distinto (pocos: uno por etiqueta de la categoría elegida más el gris de "sin etiqueta").
     val markerBitmaps = remember { HashMap<Int, android.graphics.Bitmap>() }
+
+    // Resaltado del punto suelto que pasa bajo la cruz central: se sondea al mover el mapa (cameraTick) y se dibuja
+    // en un administrador propio, encima de los marcadores, para que los toques sigan llegando al punto de abajo.
+    val cameraTick = remember { mutableIntStateOf(0) }
+    val crosshairTarget = remember { mutableStateOf<CrosshairTarget?>(null) }
+    val highlightManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
+    val highlightBitmaps = remember { HashMap<Int, android.graphics.Bitmap>() }
+    val density = LocalDensity.current.density
 
     val store = container.mapStateStore
     val map = mapViewRef.value?.mapboxMap
@@ -226,10 +292,13 @@ fun MapScreen(
     LaunchedEffect(mapView, clustering) {
         val view = mapView ?: return@LaunchedEffect
         val plugin = view.annotations
+        highlightManagerRef.value?.let { plugin.removeAnnotationManager(it) }
+        highlightManagerRef.value = null
         annotationManagerRef.value?.let { plugin.removeAnnotationManager(it) }
         annotationManagerRef.value = null
         val manager = plugin.createPointAnnotationManager(
             AnnotationConfig(
+                layerId = POINTS_LAYER_ID, // ID propio: el sondeo de la cruz consulta exactamente esta capa
                 annotationSourceOptions = AnnotationSourceOptions(
                     clusterOptions = if (clustering) {
                         ClusterOptions(
@@ -266,6 +335,61 @@ fun MapScreen(
             true
         })
         annotationManagerRef.value = manager
+
+        // Capa de resaltado: se crea DESPUÉS de los marcadores para quedar encima, sin agrupar y sin colisiones
+        // (el nombre debe verse aunque haya otros símbolos cerca). No tiene listeners: no intercepta toques.
+        highlightManagerRef.value = plugin.createPointAnnotationManager().also { overlay ->
+            overlay.iconAllowOverlap = true
+            overlay.iconIgnorePlacement = true
+            overlay.textAllowOverlap = true
+            overlay.textIgnorePlacement = true
+        }
+    }
+
+    // Sondeo de la cruz: pregunta a Mapbox qué marcadores SUELTOS hay dibujados bajo ella. Así coincide con lo que se
+    // ve (filtros incluidos) y un punto dentro de un grupo no cuenta. snapshotFlow junta los cambios de cámara
+    // intermedios: se procesa el último sin acumular consultas.
+    LaunchedEffect(mapView, annotationManagerRef.value, markers) {
+        val view = mapView ?: return@LaunchedEffect
+        if (annotationManagerRef.value == null) return@LaunchedEffect
+        snapshotFlow { cameraTick.intValue }.collect {
+            crosshairTarget.value = probeCrosshair(view, CROSSHAIR_RADIUS_DP * density)
+        }
+    }
+
+    // Texto del resaltado: "Nombre - 420 m" (la distancia solo si hay GPS) y debajo las etiquetas del punto.
+    val crosshairPoint = remember(crosshairTarget.value, points) {
+        crosshairTarget.value?.let { target -> points.firstOrNull { it.id == target.pointId } }
+    }
+    val crosshairText: String? = crosshairPoint?.let { point ->
+        val distance = currentLocation?.let {
+            formatDistance(distanceMeters(it.latitude, it.longitude, point.latitude, point.longitude))
+        }
+        val labelNames = LabelKind.entries.mapNotNull { kind -> point.labelIdFor(kind)?.let { id -> allLabels.firstOrNull { it.id == id }?.name } }
+        val more = crosshairTarget.value?.moreCount?.takeIf { it > 0 }?.let { "+$it más" }
+        val second = (labelNames + listOfNotNull(more)).joinToString(" · ")
+        listOfNotNull(if (distance != null) "${point.name} - $distance" else point.name, second.ifEmpty { null })
+            .joinToString("\n")
+    }
+    val highlightManager = highlightManagerRef.value
+    LaunchedEffect(crosshairPoint?.id, crosshairText, highlightManager, markers) {
+        val overlay = highlightManager ?: return@LaunchedEffect
+        overlay.deleteAll()
+        val point = crosshairPoint ?: return@LaunchedEffect
+        val color = markers.firstOrNull { it.id == point.id }?.color ?: UNLABELED_COLOR
+        overlay.create(
+            PointAnnotationOptions()
+                .withPoint(GeoPoint.fromLngLat(point.longitude, point.latitude))
+                .withIconImage(highlightBitmaps.getOrPut(color) { createHighlightBitmap(color) })
+                .withTextField(crosshairText ?: point.name)
+                .withTextAnchor(TextAnchor.LEFT)
+                .withTextJustify(TextJustify.LEFT)
+                .withTextOffset(listOf(2.3, 0.0))
+                .withTextSize(14.0)
+                .withTextColor("#FFFFFF")
+                .withTextHaloColor("#000000")
+                .withTextHaloWidth(2.0)
+        )
     }
 
     // Los marcadores se recrean solo cuando cambian los puntos visibles o sus colores (no en cada fix de GPS ni
@@ -309,7 +433,10 @@ fun MapScreen(
                     mapboxMap.subscribeCameraChanged {
                         val c = mapboxMap.cameraState
                         store.camera = CameraSnapshot(c.center.latitude(), c.center.longitude(), c.zoom)
+                        cameraTick.intValue++
                     }
+                    // Al quedar quieto el mapa los marcadores ya están dibujados: sondeo final para asentar el resaltado.
+                    mapboxMap.subscribeMapIdle { cameraTick.intValue++ }
                     location.updateSettings { enabled = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
