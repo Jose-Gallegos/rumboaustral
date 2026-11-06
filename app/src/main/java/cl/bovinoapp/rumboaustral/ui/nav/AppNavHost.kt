@@ -79,7 +79,9 @@ fun AppNavHost(container: AppContainer) {
                     container = container,
                     onAddPointAt = { lat, lon ->
                         navController.navigate("punto/editar?pointId=0&lat=$lat&lon=$lon")
-                    }
+                    },
+                    onEditPoint = { id -> navController.navigate("punto/editar?pointId=$id&lat=0&lon=0") },
+                    onNavigateToPoint = { id -> navController.navigate("navegacion/$id") }
                 )
             }
             composable(ROUTE_POINTS) {

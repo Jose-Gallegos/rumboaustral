@@ -1,6 +1,21 @@
 package cl.bovinoapp.rumboaustral.ui.map
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material3.Card
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import cl.bovinoapp.rumboaustral.geo.distanceMeters
+import cl.bovinoapp.rumboaustral.geo.formatDistance
+import com.google.gson.JsonPrimitive
+import com.mapbox.maps.plugin.annotation.generated.OnPointAnnotationClickListener
+import com.mapbox.maps.plugin.gestures.OnMapClickListener
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Offset
@@ -53,11 +68,17 @@ private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builde
 @Composable
 fun MapScreen(
     container: AppContainer,
-    onAddPointAt: (lat: Double, lon: Double) -> Unit
+    onAddPointAt: (lat: Double, lon: Double) -> Unit,
+    onEditPoint: (Long) -> Unit,
+    onNavigateToPoint: (Long) -> Unit
 ) {
     val viewModel: MapViewModel = viewModel(factory = mapViewModelFactory(container))
     val currentLocation by viewModel.location.collectAsState()
     val points by viewModel.points.collectAsState()
+
+    // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
+    val selectedPointId = remember { mutableStateOf<Long?>(null) }
+    val selectedPoint = points.firstOrNull { it.id == selectedPointId.value }
 
     val annotationManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
@@ -120,7 +141,16 @@ fun MapScreen(
                         store.camera = CameraSnapshot(c.center.latitude(), c.center.longitude(), c.zoom)
                     }
                     location.updateSettings { enabled = true }
-                    annotationManagerRef.value = annotations.createPointAnnotationManager()
+                    annotationManagerRef.value = annotations.createPointAnnotationManager().also { manager ->
+                        manager.addClickListener(OnPointAnnotationClickListener { annotation ->
+                            selectedPointId.value = annotation.getData()?.asLong
+                            true
+                        })
+                    }
+                    gestures.addOnMapClickListener(OnMapClickListener {
+                        selectedPointId.value = null
+                        false
+                    })
                     gestures.addOnMoveListener(object : OnMoveListener {
                         override fun onMoveBegin(detector: MoveGestureDetector) {
                             store.autoCenterPending = false
@@ -144,6 +174,7 @@ fun MapScreen(
                         PointAnnotationOptions()
                             .withPoint(GeoPoint.fromLngLat(point.longitude, point.latitude))
                             .withIconImage(markerBitmap)
+                            .withData(JsonPrimitive(point.id))
                     )
                 }
             }
@@ -159,6 +190,51 @@ fun MapScreen(
             for ((stroke, color) in listOf(outline to Color.Black.copy(alpha = 0.6f), thin to Color.White)) {
                 drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), strokeWidth = stroke)
                 drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), strokeWidth = stroke)
+            }
+        }
+
+        selectedPoint?.let { point ->
+            Card(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 16.dp, bottom = 24.dp, end = 104.dp)
+                    .fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 4.dp)) {
+                    Text(
+                        point.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    currentLocation?.let {
+                        Text(
+                            formatDistance(distanceMeters(it.latitude, it.longitude, point.latitude, point.longitude)),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    if (point.notes.isNotBlank()) {
+                        // Vista previa acotada: las notas completas se ven en la edicion, y los
+                        // botones siempre quedan visibles aunque el texto sea largo.
+                        Text(
+                            point.notes,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        IconButton(onClick = { onNavigateToPoint(point.id) }) {
+                            Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
+                        }
+                        IconButton(onClick = { onEditPoint(point.id) }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Editar")
+                        }
+                        IconButton(onClick = { selectedPointId.value = null }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                        }
+                    }
+                }
             }
         }
 
