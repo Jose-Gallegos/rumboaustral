@@ -1,6 +1,20 @@
 package cl.bovinoapp.rumboaustral.ui.map
 
 import androidx.compose.foundation.Canvas
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import cl.bovinoapp.rumboaustral.ui.navigation.HeadingSource
+import kotlinx.coroutines.awaitCancellation
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.ui.draw.rotate
+import cl.bovinoapp.rumboaustral.ui.navigation.NavigationViewModel
+import cl.bovinoapp.rumboaustral.ui.navigationViewModelFactory
+import com.mapbox.maps.EdgeInsets
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -69,12 +83,18 @@ private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builde
 fun MapScreen(
     container: AppContainer,
     onAddPointAt: (lat: Double, lon: Double) -> Unit,
-    onEditPoint: (Long) -> Unit,
-    onNavigateToPoint: (Long) -> Unit
+    onEditPoint: (Long) -> Unit
 ) {
     val viewModel: MapViewModel = viewModel(factory = mapViewModelFactory(container))
     val currentLocation by viewModel.location.collectAsState()
     val points by viewModel.points.collectAsState()
+
+    // Navegacion hacia un waypoint: el destino vive en el store para poder fijarlo desde la lista de Puntos.
+    val navViewModel: NavigationViewModel = viewModel(factory = navigationViewModelFactory(container))
+    val navState by navViewModel.state.collectAsState()
+    val targetId by container.mapStateStore.navigationTargetId.collectAsState()
+    val targetPoint = points.firstOrNull { it.id == targetId }
+    val polylineManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
 
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
@@ -114,6 +134,66 @@ fun MapScreen(
         }
     }
 
+    LaunchedEffect(targetPoint) { navViewModel.setDestinationPoint(targetPoint) }
+
+    // El GPS ya lo observa este mapa: se reutiliza en vez de abrir otra suscripcion.
+    LaunchedEffect(currentLocation) { currentLocation?.let { navViewModel.updateLocation(it) } }
+
+    // La brujula solo corre mientras hay un destino y la pantalla esta visible (STARTED).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val isNavigating = targetPoint != null
+    LaunchedEffect(isNavigating, lifecycleOwner) {
+        if (!isNavigating) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            navViewModel.startCompass()
+            try {
+                awaitCancellation()
+            } finally {
+                navViewModel.stopCompass()
+            }
+        }
+    }
+
+    // Linea recta entre mi ubicacion y el destino, redibujada con cada posicion GPS.
+    LaunchedEffect(navState.location, targetPoint, polylineManagerRef.value) {
+        val manager = polylineManagerRef.value ?: return@LaunchedEffect
+        manager.deleteAll()
+        val loc = navState.location
+        if (loc != null && targetPoint != null) {
+            manager.create(
+                PolylineAnnotationOptions()
+                    .withPoints(
+                        listOf(
+                            GeoPoint.fromLngLat(loc.longitude, loc.latitude),
+                            GeoPoint.fromLngLat(targetPoint.longitude, targetPoint.latitude)
+                        )
+                    )
+                    .withLineColor("#FFD600")
+                    .withLineWidth(3.0)
+            )
+        }
+    }
+
+    // Al iniciar la navegacion, encuadra mi ubicacion y el destino (una vez por destino).
+    LaunchedEffect(targetPoint, navState.location != null, map) {
+        val loc = navState.location
+        if (map != null && loc != null && targetPoint != null && store.fittedTargetId != targetPoint.id) {
+            val camera = map.cameraForCoordinates(
+                listOf(
+                    GeoPoint.fromLngLat(loc.longitude, loc.latitude),
+                    GeoPoint.fromLngLat(targetPoint.longitude, targetPoint.latitude)
+                ),
+                CameraOptions.Builder().build(),
+                EdgeInsets(300.0, 150.0, 350.0, 150.0),
+                17.0,
+                null
+            )
+            map.flyTo(camera, mapAnimationOptions { duration(800) })
+            store.fittedTargetId = targetPoint.id
+            store.autoCenterPending = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -141,6 +221,8 @@ fun MapScreen(
                         store.camera = CameraSnapshot(c.center.latitude(), c.center.longitude(), c.zoom)
                     }
                     location.updateSettings { enabled = true }
+                    // La linea se crea antes que los marcadores para que quede debajo de ellos.
+                    polylineManagerRef.value = annotations.createPolylineAnnotationManager()
                     annotationManagerRef.value = annotations.createPointAnnotationManager().also { manager ->
                         manager.addClickListener(OnPointAnnotationClickListener { annotation ->
                             selectedPointId.value = annotation.getData()?.asLong
@@ -193,6 +275,52 @@ fun MapScreen(
             }
         }
 
+        // Cuadro de navegacion: destino, distancia y flecha (relativa a la orientacion del telefono).
+        targetPoint?.let { target ->
+            Card(modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 2.dp)
+                ) {
+                    // Sin brujula ni curso GPS no hay orientacion: la flecha apuntaria a un rumbo falso.
+                    if (navState.headingSource != HeadingSource.NONE) {
+                        Icon(
+                            Icons.Filled.ArrowUpward,
+                            contentDescription = "Direccion hacia el destino",
+                            modifier = Modifier.size(36.dp).rotate(navState.arrowRotationDegrees)
+                        )
+                    }
+                    Column(modifier = Modifier.padding(start = 8.dp).widthIn(max = 170.dp)) {
+                        Text(
+                            target.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            navState.distanceMeters?.let { formatDistance(it) } ?: "-- m",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        val warning = when {
+                            navState.isLocationStale -> "GPS desactualizado"
+                            navState.isLocationInaccurate -> "Precision GPS baja"
+                            navState.headingSource == HeadingSource.NONE -> "Orientacion no disponible"
+                            else -> null
+                        }
+                        warning?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    IconButton(onClick = {
+                        store.navigationTargetId.value = null
+                        store.fittedTargetId = null
+                    }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Terminar navegacion")
+                    }
+                }
+            }
+        }
+
         selectedPoint?.let { point ->
             Card(
                 modifier = Modifier
@@ -224,7 +352,10 @@ fun MapScreen(
                         )
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        IconButton(onClick = { onNavigateToPoint(point.id) }) {
+                        IconButton(onClick = {
+                            store.navigationTargetId.value = point.id
+                            selectedPointId.value = null
+                        }) {
                             Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
                         }
                         IconButton(onClick = { onEditPoint(point.id) }) {

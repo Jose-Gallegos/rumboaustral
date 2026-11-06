@@ -24,14 +24,12 @@ import androidx.navigation.NavType
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.ui.downloads.DownloadsScreen
 import cl.bovinoapp.rumboaustral.ui.map.MapScreen
-import cl.bovinoapp.rumboaustral.ui.navigation.NavigationScreen
 import cl.bovinoapp.rumboaustral.ui.points.PointEditScreen
 import cl.bovinoapp.rumboaustral.ui.points.PointsListScreen
 
 private const val ROUTE_MAP = "mapa"
 private const val ROUTE_POINTS = "puntos"
 private const val ROUTE_DOWNLOADS = "descargas"
-private const val ROUTE_NAVIGATION = "navegacion/{pointId}"
 private const val ROUTE_POINT_EDIT = "punto/editar?pointId={pointId}&lat={lat}&lon={lon}"
 
 private data class BottomTab(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
@@ -80,27 +78,27 @@ fun AppNavHost(container: AppContainer) {
                     onAddPointAt = { lat, lon ->
                         navController.navigate("punto/editar?pointId=0&lat=$lat&lon=$lon")
                     },
-                    onEditPoint = { id -> navController.navigate("punto/editar?pointId=$id&lat=0&lon=0") },
-                    onNavigateToPoint = { id -> navController.navigate("navegacion/$id") }
+                    onEditPoint = { id -> navController.navigate("punto/editar?pointId=$id&lat=0&lon=0") }
                 )
             }
             composable(ROUTE_POINTS) {
                 PointsListScreen(
                     container = container,
                     onEditPoint = { id -> navController.navigate("punto/editar?pointId=$id&lat=0&lon=0") },
-                    onNavigateToPoint = { id -> navController.navigate("navegacion/$id") },
+                    onNavigateToPoint = { id ->
+                        // La navegacion se muestra sobre el mapa: fija el destino y vuelve a esa pestana.
+                        container.mapStateStore.navigationTargetId.value = id
+                        navController.navigate(ROUTE_MAP) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onAddPoint = { navController.navigate("punto/editar?pointId=0&lat=0&lon=0") }
                 )
             }
             composable(ROUTE_DOWNLOADS) {
                 DownloadsScreen(container = container)
-            }
-            composable(
-                ROUTE_NAVIGATION,
-                arguments = listOf(navArgument("pointId") { type = NavType.LongType })
-            ) { backStackEntry ->
-                val pointId = backStackEntry.arguments?.getLong("pointId") ?: 0L
-                NavigationScreen(container = container, pointId = pointId)
             }
             composable(
                 ROUTE_POINT_EDIT,

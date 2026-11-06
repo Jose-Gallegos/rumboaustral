@@ -19,8 +19,6 @@ fun pointsViewModelFactory(container: AppContainer) = viewModelFactory {
 fun navigationViewModelFactory(container: AppContainer) = viewModelFactory {
     initializer {
         NavigationViewModel(
-            container.pointsRepository,
-            container.locationTracker,
             container.compassTracker
         )
     }

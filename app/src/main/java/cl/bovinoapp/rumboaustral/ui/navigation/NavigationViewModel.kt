@@ -3,7 +3,6 @@ package cl.bovinoapp.rumboaustral.ui.navigation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cl.bovinoapp.rumboaustral.data.Point
-import cl.bovinoapp.rumboaustral.data.PointsRepository
 import cl.bovinoapp.rumboaustral.geo.angularDifferenceDegrees
 import cl.bovinoapp.rumboaustral.geo.distanceMeters
 import cl.bovinoapp.rumboaustral.geo.initialBearingDegrees
@@ -11,7 +10,7 @@ import cl.bovinoapp.rumboaustral.location.CompassTracker
 import cl.bovinoapp.rumboaustral.location.LOCATION_LOW_ACCURACY_METERS
 import cl.bovinoapp.rumboaustral.location.LOCATION_STALE_AFTER_MILLIS
 import cl.bovinoapp.rumboaustral.location.LocationState
-import cl.bovinoapp.rumboaustral.location.LocationTracker
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,21 +32,25 @@ data class NavigationUiState(
 
 enum class HeadingSource { DEVICE_COMPASS, GPS_COURSE, NONE }
 
+/**
+ * No abre sensores por su cuenta: la ubicacion se la entrega quien ya la observa (el mapa) con
+ * [updateLocation], y la brujula solo se activa entre [startCompass] y [stopCompass].
+ */
 class NavigationViewModel(
-    private val pointsRepository: PointsRepository,
-    private val locationTracker: LocationTracker,
     private val compassTracker: CompassTracker
 ) : ViewModel() {
     private val _state = MutableStateFlow(NavigationUiState())
     val state: StateFlow<NavigationUiState> = _state.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            locationTracker.observeLocation().collect { location ->
-                _state.value = recompute(_state.value.copy(location = location))
-            }
-        }
-        viewModelScope.launch {
+    private var compassJob: Job? = null
+
+    fun updateLocation(location: LocationState) {
+        _state.value = recompute(_state.value.copy(location = location))
+    }
+
+    fun startCompass() {
+        if (compassJob?.isActive == true) return
+        compassJob = viewModelScope.launch {
             compassTracker.observeAzimuthDegrees()
                 .catch { /* Sin sensor de orientacion: se usa el curso GPS como respaldo. */ }
                 .collect { azimuth ->
@@ -56,11 +59,16 @@ class NavigationViewModel(
         }
     }
 
-    fun setDestination(pointId: Long) {
-        viewModelScope.launch {
-            val point = pointsRepository.getById(pointId)
-            _state.value = recompute(_state.value.copy(destination = point))
-        }
+    fun stopCompass() {
+        compassJob?.cancel()
+        compassJob = null
+        // Un azimut viejo no debe usarse al reanudar.
+        _state.value = recompute(_state.value.copy(deviceAzimuthDegrees = null))
+    }
+
+    /** Fija el destino (o lo limpia con null). Se puede llamar de nuevo si el punto se edita. */
+    fun setDestinationPoint(point: Point?) {
+        _state.value = recompute(_state.value.copy(destination = point))
     }
 
     private fun recompute(state: NavigationUiState): NavigationUiState {

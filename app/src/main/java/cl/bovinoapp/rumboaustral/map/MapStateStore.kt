@@ -1,6 +1,7 @@
 package cl.bovinoapp.rumboaustral.map
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
 
 data class CameraSnapshot(val latitude: Double, val longitude: Double, val zoom: Double)
 
@@ -14,6 +15,12 @@ data class LatLon(val latitude: Double, val longitude: Double)
  */
 class MapStateStore(context: Context) {
     private val prefs = context.getSharedPreferences("map_state", Context.MODE_PRIVATE)
+
+    /** Waypoint hacia el que se esta navegando (null = sin navegacion). Solo en memoria. */
+    val navigationTargetId = MutableStateFlow<Long?>(null)
+
+    /** Destino para el que ya se encuadro la camara, para no reencuadrar al volver a la pestana. */
+    @Volatile var fittedTargetId: Long? = null
 
     @Volatile var camera: CameraSnapshot? = null
     @Volatile var autoCenterPending: Boolean = true
