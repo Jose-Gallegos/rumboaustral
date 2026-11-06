@@ -8,6 +8,7 @@ import cl.bovinoapp.rumboaustral.geo.distanceMeters
 import cl.bovinoapp.rumboaustral.gpx.GpxIo
 import cl.bovinoapp.rumboaustral.location.LocationState
 import java.io.InputStream
+import kotlin.coroutines.cancellation.CancellationException
 import java.io.OutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,11 +48,18 @@ class PointsViewModel(private val repository: PointsRepository) : ViewModel() {
         lastLocation.value = location
     }
 
-    fun savePoint(point: Point, onSaved: (Long) -> Unit = {}) {
+    fun savePoint(point: Point, onError: (Throwable) -> Unit = {}, onSaved: (Long) -> Unit = {}) {
         viewModelScope.launch {
-            val id = if (point.id == 0L) repository.save(point) else {
-                repository.update(point)
-                point.id
+            val id = try {
+                if (point.id == 0L) repository.save(point) else {
+                    repository.update(point)
+                    point.id
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onError(e)
+                return@launch
             }
             onSaved(id)
         }

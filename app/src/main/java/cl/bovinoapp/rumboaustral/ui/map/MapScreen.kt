@@ -97,7 +97,8 @@ fun MapScreen(
     val navViewModel: NavigationViewModel = viewModel(factory = navigationViewModelFactory(container))
     val navState by navViewModel.state.collectAsState()
     val targetId by container.mapStateStore.navigationTargetId.collectAsState()
-    val targetPoint = points.firstOrNull { it.id == targetId }
+    val temporaryDestination by container.mapStateStore.temporaryDestination.collectAsState()
+    val targetPoint = points.firstOrNull { it.id == targetId } ?: temporaryDestination
     val polylineManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
 
     // Waypoint tocado en el mapa; se resuelve contra la lista para reflejar ediciones y borrados.
@@ -316,10 +317,7 @@ fun MapScreen(
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
                     }
-                    IconButton(onClick = {
-                        store.navigationTargetId.value = null
-                        store.fittedTargetId = null
-                    }) {
+                    IconButton(onClick = { store.stopNavigation() }) {
                         Icon(Icons.Filled.Close, contentDescription = "Terminar navegacion")
                     }
                 }
@@ -335,10 +333,7 @@ fun MapScreen(
                     TextButton(onClick = {
                         viewModel.deletePoint(point)
                         selectedPointId.value = null
-                        if (store.navigationTargetId.value == point.id) {
-                            store.navigationTargetId.value = null
-                            store.fittedTargetId = null
-                        }
+                        if (store.navigationTargetId.value == point.id) store.stopNavigation()
                         pointToDelete.value = null
                     }) { Text("Eliminar") }
                 },
@@ -380,7 +375,7 @@ fun MapScreen(
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         IconButton(onClick = {
-                            store.navigationTargetId.value = point.id
+                            store.navigateToPoint(point.id)
                             selectedPointId.value = null
                         }) {
                             Icon(Icons.Filled.Navigation, contentDescription = "Navegar")

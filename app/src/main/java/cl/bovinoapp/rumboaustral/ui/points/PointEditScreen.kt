@@ -4,8 +4,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -33,7 +36,9 @@ fun PointEditScreen(
     pointId: Long,
     initialLatitude: Double,
     initialLongitude: Double,
-    onDone: () -> Unit
+    onDone: () -> Unit,
+    /** pointId != 0: navegar al waypoint guardado; 0: navegar solo a las coordenadas. */
+    onNavigate: (pointId: Long, lat: Double, lon: Double) -> Unit
 ) {
     val viewModel: PointsViewModel = viewModel(factory = pointsViewModelFactory(container))
 
@@ -44,6 +49,9 @@ fun PointEditScreen(
     var longitudeText by remember { mutableStateOf(initialLongitude.toString()) }
     var loadedExisting by remember { mutableStateOf(pointId == 0L) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var original by remember { mutableStateOf<Point?>(null) }
+    var pendingNavigation by remember { mutableStateOf<Point?>(null) }
+    var saving by remember { mutableStateOf(false) }
 
     LaunchedEffect(pointId) {
         if (pointId == 0L) {
@@ -56,9 +64,38 @@ fun PointEditScreen(
                 notes = point.notes
                 latitudeText = point.latitude.toString()
                 longitudeText = point.longitude.toString()
+                original = point
             }
             loadedExisting = true
         }
+    }
+
+    pendingNavigation?.let { edited ->
+        AlertDialog(
+            onDismissRequest = { if (!saving) pendingNavigation = null },
+            title = { Text("Guardar cambios") },
+            text = { Text("Hay cambios sin guardar. ¿Guardarlos y navegar al waypoint?") },
+            confirmButton = {
+                TextButton(enabled = !saving, onClick = {
+                    saving = true
+                    viewModel.savePoint(
+                        edited,
+                        onError = {
+                            saving = false
+                            pendingNavigation = null
+                            errorMessage = "No se pudo guardar; no se inició la navegación"
+                        }
+                    ) { id ->
+                        saving = false
+                        pendingNavigation = null
+                        onNavigate(id, edited.latitude, edited.longitude)
+                    }
+                }) { Text("Guardar y navegar") }
+            },
+            dismissButton = {
+                TextButton(enabled = !saving, onClick = { pendingNavigation = null }) { Text("Cancelar") }
+            }
+        )
     }
 
     Scaffold(
@@ -112,6 +149,30 @@ fun PointEditScreen(
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
             ) {
                 Text("Guardar")
+            }
+            OutlinedButton(
+                onClick = {
+                    val lat = latitudeText.toDoubleOrNull()
+                    val lon = longitudeText.toDoubleOrNull()
+                    errorMessage = when {
+                        lat == null || !isValidLatitude(lat) -> "La latitud debe ser un numero entre -90 y 90"
+                        lon == null || !isValidLongitude(lon) -> "La longitud debe ser un numero entre -180 y 180"
+                        else -> null
+                    }
+                    if (errorMessage != null || lat == null || lon == null) return@OutlinedButton
+                    val saved = original
+                    when {
+                        pointId == 0L || saved == null -> onNavigate(0L, lat, lon)
+                        saved.name == name && saved.notes == notes &&
+                            saved.latitude == lat && saved.longitude == lon -> onNavigate(pointId, lat, lon)
+                        name.isBlank() -> errorMessage = "Ingresa un nombre para guardar los cambios"
+                        else -> pendingNavigation = saved.copy(name = name, latitude = lat, longitude = lon, notes = notes)
+                    }
+                },
+                enabled = !saving,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                Text("Navegar")
             }
         }
     }

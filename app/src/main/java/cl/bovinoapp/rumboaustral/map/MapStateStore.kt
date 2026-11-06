@@ -1,6 +1,7 @@
 package cl.bovinoapp.rumboaustral.map
 
 import android.content.Context
+import cl.bovinoapp.rumboaustral.data.Point
 import kotlinx.coroutines.flow.MutableStateFlow
 
 data class CameraSnapshot(val latitude: Double, val longitude: Double, val zoom: Double)
@@ -18,6 +19,28 @@ class MapStateStore(context: Context) {
 
     /** Waypoint hacia el que se esta navegando (null = sin navegacion). Solo en memoria. */
     val navigationTargetId = MutableStateFlow<Long?>(null)
+
+    /** Destino sin guardar (coordenadas del formulario). Solo en memoria; excluyente con [navigationTargetId]. */
+    val temporaryDestination = MutableStateFlow<Point?>(null)
+
+    fun navigateToPoint(id: Long) {
+        temporaryDestination.value = null
+        fittedTargetId = null
+        navigationTargetId.value = id
+    }
+
+    fun navigateToCoordinates(latitude: Double, longitude: Double) {
+        navigationTargetId.value = null
+        fittedTargetId = null
+        temporaryDestination.value = Point(id = 0L, name = "Destino", latitude = latitude, longitude = longitude)
+    }
+
+    /** Termina la navegacion y descarta cualquier destino (guardado o temporal). */
+    fun stopNavigation() {
+        navigationTargetId.value = null
+        temporaryDestination.value = null
+        fittedTargetId = null
+    }
 
     /** Destino para el que ya se encuadro la camara, para no reencuadrar al volver a la pestana. */
     @Volatile var fittedTargetId: Long? = null

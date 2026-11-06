@@ -87,7 +87,7 @@ fun AppNavHost(container: AppContainer) {
                     onEditPoint = { id -> navController.navigate("punto/editar?pointId=$id&lat=0&lon=0") },
                     onNavigateToPoint = { id ->
                         // La navegacion se muestra sobre el mapa: fija el destino y vuelve a esa pestana.
-                        container.mapStateStore.navigationTargetId.value = id
+                        container.mapStateStore.navigateToPoint(id)
                         navController.navigate(ROUTE_MAP) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
@@ -114,7 +114,19 @@ fun AppNavHost(container: AppContainer) {
                     pointId = args?.getLong("pointId") ?: 0L,
                     initialLatitude = args?.getString("lat")?.toDoubleOrNull() ?: 0.0,
                     initialLongitude = args?.getString("lon")?.toDoubleOrNull() ?: 0.0,
-                    onDone = { navController.popBackStack() }
+                    onDone = { navController.popBackStack() },
+                    onNavigate = { id, lat, lon ->
+                        if (id != 0L) container.mapStateStore.navigateToPoint(id)
+                        else container.mapStateStore.navigateToCoordinates(lat, lon)
+                        // Retirar el formulario ANTES de guardar el estado de las pestanas;
+                        // si no, al volver a Puntos se restauraria el formulario.
+                        navController.popBackStack()
+                        navController.navigate(ROUTE_MAP) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 )
             }
         }
