@@ -99,6 +99,7 @@ import com.mapbox.maps.plugin.gestures.OnMapLongClickListener
 import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.gestures
 import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.maps.plugin.scalebar.scalebar
 
 // Colores de los grupos de marcadores según cuántos puntos reúnen (grises azulados: no compiten con los de las etiquetas).
 private val CLUSTER_COLOR_SMALL = 0xFF455A64.toInt()
@@ -433,6 +434,8 @@ fun MapScreen(
                     // Al quedar quieto el mapa los marcadores ya están dibujados: sondeo final para asentar el resaltado.
                     mapboxMap.subscribeMapIdle { cameraTick.intValue++ }
                     location.updateSettings { enabled = true }
+                    // Mapbox elige las unidades según la región del teléfono (aquí salía en ft y millas): siempre métrica.
+                    scalebar.updateSettings { isMetricUnits = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
                     // El administrador de marcadores se crea aparte (según el agrupamiento elegido); al crearse
@@ -456,13 +459,6 @@ fun MapScreen(
             }
         )
 
-        // Estado del GPS arriba al centro: entre la escala (izquierda) y la brújula (derecha) de Mapbox.
-        GpsStatusChip(
-            location = currentLocation,
-            satellites = satellites,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
-        )
-
         // Mira central muy delgada (blanca con borde oscuro para verse sobre cualquier imagen).
         // Marca el punto exacto donde se creara el waypoint; no intercepta toques.
         Canvas(modifier = Modifier.align(Alignment.Center).size(32.dp)) {
@@ -476,46 +472,53 @@ fun MapScreen(
             }
         }
 
-        // Cuadro de navegacion: destino, distancia y flecha (relativa a la orientacion del telefono).
-        // Arriba a la izquierda, bajo la escala de Mapbox, y con margen a la derecha para no tapar la brujula
-        // (arriba a la derecha), que permite volver al norte al tocarla.
-        targetPoint?.let { target ->
-            Card(modifier = Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 12.dp, end = 72.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 2.dp)
-                ) {
-                    // Sin brujula ni curso GPS no hay orientacion: la flecha apuntaria a un rumbo falso.
-                    if (navState.headingSource != HeadingSource.NONE) {
-                        Icon(
-                            Icons.Filled.ArrowUpward,
-                            contentDescription = "Direccion hacia el destino",
-                            modifier = Modifier.size(36.dp).rotate(navState.arrowRotationDegrees)
-                        )
-                    }
-                    Column(modifier = Modifier.padding(start = 8.dp).widthIn(max = 170.dp)) {
-                        Text(
-                            target.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            navState.distanceMeters?.let { formatDistance(it) } ?: "-- m",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        val warning = when {
-                            navState.isLocationStale -> "GPS desactualizado"
-                            navState.isLocationInaccurate -> "Precision GPS baja"
-                            navState.headingSource == HeadingSource.NONE -> "Orientacion no disponible"
-                            else -> null
+        // Esquina superior izquierda, bajo la escala de Mapbox: estado del GPS y, debajo, el cuadro de navegación
+        // (destino, distancia y flecha relativa a la orientación del teléfono). En una sola columna para que no se
+        // pisen entre sí; con margen a la derecha para no tapar la brújula (arriba a la derecha), que permite volver
+        // al norte al tocarla.
+        Column(
+            modifier = Modifier.align(Alignment.TopStart).padding(top = 34.dp, start = 12.dp, end = 72.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            GpsStatusChip(location = currentLocation, satellites = satellites)
+            targetPoint?.let { target ->
+                Card {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 2.dp)
+                    ) {
+                        // Sin brujula ni curso GPS no hay orientacion: la flecha apuntaria a un rumbo falso.
+                        if (navState.headingSource != HeadingSource.NONE) {
+                            Icon(
+                                Icons.Filled.ArrowUpward,
+                                contentDescription = "Direccion hacia el destino",
+                                modifier = Modifier.size(36.dp).rotate(navState.arrowRotationDegrees)
+                            )
                         }
-                        warning?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        Column(modifier = Modifier.padding(start = 8.dp).widthIn(max = 170.dp)) {
+                            Text(
+                                target.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                navState.distanceMeters?.let { formatDistance(it) } ?: "-- m",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            val warning = when {
+                                navState.isLocationStale -> "GPS desactualizado"
+                                navState.isLocationInaccurate -> "Precision GPS baja"
+                                navState.headingSource == HeadingSource.NONE -> "Orientacion no disponible"
+                                else -> null
+                            }
+                            warning?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            }
                         }
-                    }
-                    IconButton(onClick = { store.stopNavigation() }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Terminar navegacion")
+                        IconButton(onClick = { store.stopNavigation() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Terminar navegacion")
+                        }
                     }
                 }
             }
