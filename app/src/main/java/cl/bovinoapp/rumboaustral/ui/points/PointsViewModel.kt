@@ -97,9 +97,30 @@ class PointsViewModel(private val repository: PointsRepository) : ViewModel() {
         return "Waypoint ${max + 1}"
     }
 
-    fun exportGpx(out: OutputStream) {
+    /** Respaldo GPX de TODOS los puntos (sin aplicar el filtro del buscador). */
+    fun exportGpx(open: () -> OutputStream?) {
+        if (_importing.value) return
+        _importing.value = true
         viewModelScope.launch {
-            GpxIo.export(items.value.map { it.point }, out)
+            try {
+                val count = withContext(Dispatchers.IO) {
+                    val points = repository.observeAll().first()
+                    val out = open() ?: throw java.io.IOException("No se pudo crear el archivo")
+                    out.use { GpxIo.export(points, it) }
+                    points.size
+                }
+                _message.value = when (count) {
+                    0 -> "Respaldo creado (sin puntos)"
+                    1 -> "1 punto exportado"
+                    else -> "$count puntos exportados"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _message.value = "No se pudo crear el respaldo"
+            } finally {
+                _importing.value = false
+            }
         }
     }
 

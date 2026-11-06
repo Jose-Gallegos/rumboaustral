@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -84,6 +85,10 @@ fun PointsListScreen(
         }
     }
 
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/gpx+xml")) { uri: Uri? ->
+        if (uri != null) viewModel.exportGpx { context.contentResolver.openOutputStream(uri, "wt") }
+    }
+
     importPreview?.let { preview ->
         ImportPreviewDialog(
             preview = preview,
@@ -113,13 +118,27 @@ fun PointsListScreen(
                 label = { Text("Buscar punto") },
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp)
             )
-            OutlinedButton(
-                onClick = { filePicker.launch(arrayOf("*/*")) },
-                enabled = !importing,
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(horizontal = 16.dp)
             ) {
-                Icon(Icons.Filled.FileOpen, contentDescription = null)
-                Text(if (importing) "Leyendo archivo…" else "Importar archivo (GPX, KML, KMZ)", modifier = Modifier.padding(start = 8.dp))
+                OutlinedButton(
+                    onClick = { filePicker.launch(arrayOf("*/*")) },
+                    enabled = !importing && !saving
+                ) {
+                    Icon(Icons.Filled.FileOpen, contentDescription = null)
+                    Text(if (importing) "Procesando…" else "Importar archivo", modifier = Modifier.padding(start = 8.dp))
+                }
+                OutlinedButton(
+                    onClick = {
+                        val date = java.time.LocalDate.now()
+                        exportPicker.launch("rumbo-austral-$date.gpx")
+                    },
+                    enabled = !importing && !saving
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null)
+                    Text("Exportar GPX", modifier = Modifier.padding(start = 8.dp))
+                }
             }
             LazyColumn {
                 items(items, key = { it.point.id }) { item ->
