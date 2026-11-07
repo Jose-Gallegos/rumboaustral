@@ -14,7 +14,7 @@ class PointsRepository(private val dao: PointDao) {
     /** Actualiza nombre, coordenadas, notas y etiquetas (no la fecha). @return filas actualizadas (0 si el punto ya no existe). */
     suspend fun updateDetails(point: Point): Int = dao.updateDetails(
         point.id, point.name, point.latitude, point.longitude, point.notes,
-        point.typeLabelId, point.statusLabelId, point.zoneLabelId
+        point.typeLabelId, point.statusLabelId, point.zoneLabelId, point.photoPath
     )
 
     /**

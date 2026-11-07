@@ -7,10 +7,15 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Point::class, Label::class], version = 2, exportSchema = false)
+@Database(
+    entities = [Point::class, Label::class, Track::class, TrackPoint::class],
+    version = 3,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pointDao(): PointDao
     abstract fun labelDao(): LabelDao
+    abstract fun trackDao(): TrackDao
 
     companion object {
         @Volatile
@@ -23,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "rumbo-austral.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .addCallback(object : Callback() {
                         // Solo instalaciones nuevas; en las existentes siembra la migración.
                         override fun onCreate(db: SupportSQLiteDatabase) = seedDefaultLabels(db)
@@ -63,6 +68,28 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_points_zoneLabelId ON points (zoneLabelId)")
 
                 seedDefaultLabels(db)
+            }
+        }
+
+        /** Foto por punto (columna nueva) y las tablas de recorridos grabados. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE points ADD COLUMN photoPath TEXT")
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS tracks (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, startedAt INTEGER NOT NULL, endedAt INTEGER, " +
+                        "distanceMeters REAL NOT NULL, avgSpeedKmh REAL NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS track_points (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "trackId INTEGER NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, " +
+                        "timestampMillis INTEGER NOT NULL, sequence INTEGER NOT NULL, " +
+                        "FOREIGN KEY(trackId) REFERENCES tracks(id) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_track_points_trackId ON track_points (trackId)")
             }
         }
 

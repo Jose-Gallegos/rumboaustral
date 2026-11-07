@@ -69,7 +69,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLocation
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -109,6 +111,18 @@ import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.scalebar.scalebar
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import cl.bovinoapp.rumboaustral.location.TrackRecordingService
+import cl.bovinoapp.rumboaustral.location.TrackRecordingState
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // Colores de los grupos de marcadores según cuántos puntos reúnen (grises azulados: no compiten con los de las etiquetas).
 private val CLUSTER_COLOR_SMALL = 0xFF455A64.toInt()
@@ -213,6 +227,14 @@ fun MapScreen(
 
     val store = container.mapStateStore
     val map = mapViewRef.value?.mapboxMap
+
+    // Grabacion de recorridos: el estado vive en el servicio (sigue corriendo en 2do plano); aca solo
+    // se observa para mostrar el chip de progreso y decidir si el FAB inicia o detiene.
+    val mapContext = LocalContext.current
+    val recordingSnapshot by TrackRecordingState.snapshot.collectAsState()
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* si se niega, el servicio igual graba, solo sin notificacion visible */ }
 
     // Sin camara guardada y sin GPS aun: usar la ultima ubicacion conocida del sistema
     // si nunca habiamos guardado una propia.
@@ -803,6 +825,38 @@ fun MapScreen(
         ) {
             Icon(Icons.Filled.MyLocation, contentDescription = "Centrar en mi ubicacion")
         }
+
+        FloatingActionButton(
+            onClick = {
+                if (recordingSnapshot != null) {
+                    TrackRecordingService.stop(mapContext)
+                } else {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(mapContext, Manifest.permission.POST_NOTIFICATIONS) !=
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    val name = "Recorrido " + SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
+                    TrackRecordingService.start(mapContext, name)
+                }
+            }
+        ) {
+            if (recordingSnapshot != null) {
+                Icon(Icons.Filled.Stop, contentDescription = "Detener grabacion")
+            } else {
+                Icon(Icons.Filled.FiberManualRecord, contentDescription = "Grabar recorrido")
+            }
+        }
+        }
+
+        recordingSnapshot?.let { snapshot ->
+            Text(
+                "Grabando • %.2f km".format(snapshot.distanceMeters / 1000.0),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp)
+            )
         }
     }
 }

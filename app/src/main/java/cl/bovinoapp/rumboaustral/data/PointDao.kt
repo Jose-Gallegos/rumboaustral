@@ -30,11 +30,12 @@ interface PointDao {
     // Escribe solo los campos que edita el formulario (no la fecha de creación) en una sola sentencia.
     @Query(
         "UPDATE points SET name = :name, latitude = :latitude, longitude = :longitude, notes = :notes, " +
-            "typeLabelId = :typeLabelId, statusLabelId = :statusLabelId, zoneLabelId = :zoneLabelId WHERE id = :id"
+            "typeLabelId = :typeLabelId, statusLabelId = :statusLabelId, zoneLabelId = :zoneLabelId, " +
+            "photoPath = :photoPath WHERE id = :id"
     )
     suspend fun updateDetails(
         id: Long, name: String, latitude: Double, longitude: Double, notes: String,
-        typeLabelId: Long?, statusLabelId: Long?, zoneLabelId: Long?
+        typeLabelId: Long?, statusLabelId: Long?, zoneLabelId: Long?, photoPath: String?
     ): Int
 
     // Asignación masiva de una etiqueta por categoría. Con overwrite = false solo se llena lo que está sin etiqueta.

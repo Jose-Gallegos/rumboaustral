@@ -5,6 +5,7 @@ import cl.bovinoapp.rumboaustral.data.AppDatabase
 import cl.bovinoapp.rumboaustral.data.LabelsRepository
 import cl.bovinoapp.rumboaustral.data.PointFilterStore
 import cl.bovinoapp.rumboaustral.data.PointsRepository
+import cl.bovinoapp.rumboaustral.data.TracksRepository
 import cl.bovinoapp.rumboaustral.location.CompassTracker
 import cl.bovinoapp.rumboaustral.location.LocationTracker
 import cl.bovinoapp.rumboaustral.map.MapStateStore
@@ -15,6 +16,7 @@ class AppContainer(context: Context) {
     private val database = AppDatabase.get(context)
     val pointsRepository = PointsRepository(database.pointDao())
     val labelsRepository = LabelsRepository(database.labelDao())
+    val tracksRepository = TracksRepository(database.trackDao())
     val pointFilterStore = PointFilterStore()
     val locationTracker = LocationTracker(context)
     val compassTracker = CompassTracker(context)

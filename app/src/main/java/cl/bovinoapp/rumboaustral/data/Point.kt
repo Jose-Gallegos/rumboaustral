@@ -27,5 +27,7 @@ data class Point(
     val createdAt: Long = System.currentTimeMillis(),
     val typeLabelId: Long? = null,
     val statusLabelId: Long? = null,
-    val zoneLabelId: Long? = null
+    val zoneLabelId: Long? = null,
+    /** Ruta absoluta a la foto (ya reducida/comprimida) en el almacenamiento privado de la app, o null. */
+    val photoPath: String? = null
 )

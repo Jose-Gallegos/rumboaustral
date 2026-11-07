@@ -36,14 +36,22 @@ class DownloadsViewModel(private val repository: OfflineRegionsRepository) : Vie
         }
     }
 
-    fun downloadRegion(id: String, centerLat: Double, centerLon: Double, sideMeters: Double) {
+    fun downloadRegion(
+        id: String,
+        centerLat: Double,
+        centerLon: Double,
+        sideMeters: Double,
+        minZoom: Byte = 10,
+        maxZoom: Byte = 15
+    ) {
         downloadJob?.cancel()
         _state.value = _state.value.copy(activeDownloadId = id, activeDownloadFraction = 0f, errorMessage = null)
         downloadJob = viewModelScope.launch {
             runCatching {
-                repository.download(id, GeoPoint.fromLngLat(centerLon, centerLat), sideMeters).collect { progress ->
-                    _state.value = _state.value.copy(activeDownloadFraction = progress.fraction)
-                }
+                repository.download(id, GeoPoint.fromLngLat(centerLon, centerLat), sideMeters, minZoom, maxZoom)
+                    .collect { progress ->
+                        _state.value = _state.value.copy(activeDownloadFraction = progress.fraction)
+                    }
             }.onFailure { e ->
                 _state.value = _state.value.copy(errorMessage = e.message)
             }

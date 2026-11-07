@@ -4,9 +4,15 @@ import android.util.Xml
 import cl.bovinoapp.rumboaustral.data.Label
 import cl.bovinoapp.rumboaustral.data.LabelKind
 import cl.bovinoapp.rumboaustral.data.Point
+import cl.bovinoapp.rumboaustral.data.Track
+import cl.bovinoapp.rumboaustral.data.TrackPoint
 import cl.bovinoapp.rumboaustral.data.labelIdFor
 import java.io.OutputStream
 import java.io.StringWriter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Exportación a GPX 1.1. Las etiquetas viajan de dos formas, ambas previstas por el estándar:
@@ -64,6 +70,43 @@ object GpxIo {
             }
             serializer.endTag(null, "wpt")
         }
+
+        serializer.endTag(null, "gpx")
+        serializer.endDocument()
+        out.write(writer.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private val ISO_UTC = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+
+    /** Exporta un recorrido grabado como un único `<trk>` con sus puntos en orden. */
+    fun exportTrack(track: Track, points: List<TrackPoint>, out: OutputStream) {
+        val writer = StringWriter()
+        val serializer = Xml.newSerializer()
+        serializer.setOutput(writer)
+        serializer.startDocument("UTF-8", true)
+        serializer.startTag(null, "gpx")
+        serializer.attribute(null, "version", "1.1")
+        serializer.attribute(null, "creator", "Rumbo Austral")
+        serializer.attribute(null, "xmlns", "http://www.topografix.com/GPX/1/1")
+
+        serializer.startTag(null, "trk")
+        serializer.startTag(null, "name")
+        serializer.text(track.name)
+        serializer.endTag(null, "name")
+        serializer.startTag(null, "trkseg")
+        points.forEach { point ->
+            serializer.startTag(null, "trkpt")
+            serializer.attribute(null, "lat", point.latitude.toString())
+            serializer.attribute(null, "lon", point.longitude.toString())
+            serializer.startTag(null, "time")
+            serializer.text(ISO_UTC.format(Date(point.timestampMillis)))
+            serializer.endTag(null, "time")
+            serializer.endTag(null, "trkpt")
+        }
+        serializer.endTag(null, "trkseg")
+        serializer.endTag(null, "trk")
 
         serializer.endTag(null, "gpx")
         serializer.endDocument()

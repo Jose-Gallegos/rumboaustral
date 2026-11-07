@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -39,10 +40,12 @@ import cl.bovinoapp.rumboaustral.ui.downloads.DownloadsScreen
 import cl.bovinoapp.rumboaustral.ui.map.MapScreen
 import cl.bovinoapp.rumboaustral.ui.points.PointEditScreen
 import cl.bovinoapp.rumboaustral.ui.points.PointsListScreen
+import cl.bovinoapp.rumboaustral.ui.tracks.TracksListScreen
 
 private const val ROUTE_MAP = "mapa"
 private const val ROUTE_POINTS = "puntos"
 private const val ROUTE_DOWNLOADS = "descargas"
+private const val ROUTE_TRACKS = "recorridos"
 private const val ROUTE_POINT_EDIT = "punto/editar?pointId={pointId}&lat={lat}&lon={lon}"
 
 private const val EXIT_WINDOW_MILLIS = 2_000L
@@ -58,6 +61,7 @@ private data class BottomTab(val route: String, val label: String, val icon: and
 private val bottomTabs = listOf(
     BottomTab(ROUTE_MAP, "Mapa", Icons.Filled.Map),
     BottomTab(ROUTE_POINTS, "Puntos", Icons.Filled.Place),
+    BottomTab(ROUTE_TRACKS, "Recorridos", Icons.Filled.Route),
     BottomTab(ROUTE_DOWNLOADS, "Mapas", Icons.Filled.CloudDownload)
 )
 
@@ -153,6 +157,9 @@ fun AppNavHost(container: AppContainer) {
             }
             composable(ROUTE_DOWNLOADS) {
                 DownloadsScreen(container = container)
+            }
+            composable(ROUTE_TRACKS) {
+                TracksListScreen(container = container)
             }
             composable(
                 ROUTE_POINT_EDIT,

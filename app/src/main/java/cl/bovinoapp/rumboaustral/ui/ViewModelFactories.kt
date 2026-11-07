@@ -8,6 +8,7 @@ import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
 import cl.bovinoapp.rumboaustral.ui.map.MapViewModel
 import cl.bovinoapp.rumboaustral.ui.navigation.NavigationViewModel
 import cl.bovinoapp.rumboaustral.ui.points.PointsViewModel
+import cl.bovinoapp.rumboaustral.ui.tracks.TracksViewModel
 
 fun mapViewModelFactory(container: AppContainer) = viewModelFactory {
     initializer {
@@ -40,4 +41,8 @@ fun navigationViewModelFactory(container: AppContainer) = viewModelFactory {
 
 fun downloadsViewModelFactory(container: AppContainer) = viewModelFactory {
     initializer { DownloadsViewModel(container.offlineRegionsRepository) }
+}
+
+fun tracksViewModelFactory(container: AppContainer) = viewModelFactory {
+    initializer { TracksViewModel(container.tracksRepository) }
 }

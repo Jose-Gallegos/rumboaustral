@@ -50,6 +50,17 @@ import cl.bovinoapp.rumboaustral.ui.labels.LabelsManagerSheet
 import cl.bovinoapp.rumboaustral.ui.labels.LabelsViewModel
 import cl.bovinoapp.rumboaustral.ui.labelsViewModelFactory
 import cl.bovinoapp.rumboaustral.ui.pointsViewModelFactory
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import cl.bovinoapp.rumboaustral.photos.PhotoStorage
+import cl.bovinoapp.rumboaustral.share.ShareFiles
+import coil.compose.AsyncImage
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -77,6 +88,57 @@ fun PointEditScreen(
     var name by remember { mutableStateOf("") }
     var nameEdited by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
+    var photoPath by remember { mutableStateOf<String?>(null) }
+    // La foto que la base todavia referencia (la del punto cargado). Si se reemplaza o quita en el
+    // formulario, el archivo viejo no se borra al toque: recien se borra tras guardar con exito, para
+    // no dejar la base apuntando a un archivo ya eliminado si se sale del formulario sin guardar.
+    var originalPhotoPath by remember { mutableStateOf<String?>(null) }
+    var pendingOldPhotoToDelete by remember { mutableStateOf<String?>(null) }
+    fun replacePhoto(newPath: String?) {
+        val old = photoPath
+        photoPath = newPath
+        if (old == null || old == newPath) return
+        if (old == originalPhotoPath) {
+            // Referenciado por la base: se borra recien si el guardado que viene tiene exito.
+            pendingOldPhotoToDelete = old
+        } else {
+            // Era un archivo de un reemplazo anterior en este mismo formulario, sin guardar: no lo referencia nada.
+            PhotoStorage.delete(old)
+        }
+    }
+    fun cleanUpPhotoAfterSave() {
+        pendingOldPhotoToDelete?.let { PhotoStorage.delete(it) }
+        pendingOldPhotoToDelete = null
+        originalPhotoPath = photoPath
+    }
+    val context = LocalContext.current
+    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val file = pendingCaptureFile
+        if (success && file != null) {
+            PhotoStorage.downscaleInPlace(file)
+            replacePhoto(file.absolutePath)
+        }
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val (file, uri) = PhotoStorage.newCaptureTarget(context)
+            pendingCaptureFile = file
+            cameraLauncher.launch(uri)
+        }
+    }
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val newPath = PhotoStorage.persistFromGallery(context, uri)
+            if (newPath != null) {
+                replacePhoto(newPath)
+            }
+        }
+    }
     var latitudeText by remember { mutableStateOf(initialLatitude.toString()) }
     var longitudeText by remember { mutableStateOf(initialLongitude.toString()) }
     var loadedExisting by remember { mutableStateOf(pointId == 0L) }
@@ -140,6 +202,8 @@ fun PointEditScreen(
             viewModel.pointById(pointId)?.let { point ->
                 name = point.name
                 notes = point.notes
+                photoPath = point.photoPath
+                originalPhotoPath = point.photoPath
                 latitudeText = point.latitude.toString()
                 longitudeText = point.longitude.toString()
                 LabelKind.entries.forEach { selection[it] = point.labelIdFor(it) }
@@ -167,6 +231,7 @@ fun PointEditScreen(
                     ) { id ->
                         saving = false
                         pendingNavigation = null
+                        cleanUpPhotoAfterSave()
                         onNavigate(id, edited.latitude, edited.longitude)
                     }
                 }) { Text("Guardar y navegar") }
@@ -205,6 +270,7 @@ fun PointEditScreen(
                         ) {
                             saving = false
                             pendingMeasure = null
+                            cleanUpPhotoAfterSave()
                             onMeasure(edited.name, edited.latitude, edited.longitude)
                         }
                     }) { Text("Guardar") }
@@ -253,6 +319,43 @@ fun PointEditScreen(
                     label = { Text("Notas") },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                 )
+                Row(
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                ) {
+                    photoPath?.let { path ->
+                        AsyncImage(
+                            model = File(path),
+                            contentDescription = "Foto del punto",
+                            modifier = Modifier.size(64.dp).padding(end = 8.dp)
+                        )
+                    }
+                    Column {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                                    PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    val (file, uri) = PhotoStorage.newCaptureTarget(context)
+                                    pendingCaptureFile = file
+                                    cameraLauncher.launch(uri)
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            }) { Text("Tomar foto") }
+                            TextButton(onClick = {
+                                galleryLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            }) { Text("Elegir de galería") }
+                        }
+                        if (photoPath != null) {
+                            TextButton(onClick = { replacePhoto(null) }) { Text("Quitar foto") }
+                        }
+                    }
+                }
                 // Las etiquetas saltan de línea en vez de desplazarse: así se ven todas sin deslizar.
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -271,6 +374,20 @@ fun PointEditScreen(
                     }
                     TextButton(onClick = { showLabels = true }) {
                         Text("Administrar etiquetas")
+                    }
+                    if (pointId != 0L) {
+                        TextButton(onClick = {
+                            ShareFiles.sharePointGpx(
+                                context,
+                                withSelectedLabels(
+                                    Point(
+                                        id = pointId, name = name, latitude = latitudeText.toDoubleOrNull() ?: 0.0,
+                                        longitude = longitudeText.toDoubleOrNull() ?: 0.0, notes = notes
+                                    )
+                                ),
+                                allLabels
+                            )
+                        }) { Text("Compartir") }
                     }
                 }
                 if (labelsRefreshFailed) {
@@ -300,10 +417,10 @@ fun PointEditScreen(
                             if (errorMessage == null && lat != null && lon != null) {
                                 viewModel.savePoint(
                                     withSelectedLabels(
-                                        Point(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
+                                        Point(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes, photoPath = photoPath)
                                     ),
                                     onError = { errorMessage = "No se pudo guardar el punto" }
-                                ) { onDone() }
+                                ) { cleanUpPhotoAfterSave(); onDone() }
                             }
                         },
                         enabled = canSave,
@@ -325,13 +442,13 @@ fun PointEditScreen(
                             val saved = original
                             when {
                                 pointId == 0L || saved == null -> onNavigate(0L, lat, lon)
-                                saved.name == name && saved.notes == notes &&
+                                saved.name == name && saved.notes == notes && saved.photoPath == photoPath &&
                                     saved.latitude == lat && saved.longitude == lon &&
                                     LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) } ->
                                     onNavigate(pointId, lat, lon)
                                 name.isBlank() -> errorMessage = "Ingresa un nombre para guardar los cambios"
                                 else -> pendingNavigation = withSelectedLabels(
-                                    saved.copy(name = name, latitude = lat, longitude = lon, notes = notes)
+                                    saved.copy(name = name, latitude = lat, longitude = lon, notes = notes, photoPath = photoPath)
                                 )
                             }
                         },
@@ -365,10 +482,10 @@ fun PointEditScreen(
                             val saved = original
                             val dirty = if (pointId == 0L || saved == null) {
                                 // Punto nuevo: hay algo que perder si se escribió o eligió algo, o se cambiaron las coordenadas.
-                                nameEdited || notes.isNotBlank() || touched.isNotEmpty() ||
+                                nameEdited || notes.isNotBlank() || touched.isNotEmpty() || photoPath != null ||
                                     lat != initialLatitude || lon != initialLongitude
                             } else {
-                                !(saved.name == name && saved.notes == notes &&
+                                !(saved.name == name && saved.notes == notes && saved.photoPath == photoPath &&
                                     saved.latitude == lat && saved.longitude == lon &&
                                     LabelKind.entries.all { saved.labelIdFor(it) == effectiveLabelId(it) })
                             }
@@ -377,7 +494,10 @@ fun PointEditScreen(
                             } else {
                                 pendingMeasure = withSelectedLabels(
                                     (saved ?: Point(id = 0L, name = name, latitude = lat, longitude = lon))
-                                        .copy(id = pointId, name = name, latitude = lat, longitude = lon, notes = notes)
+                                        .copy(
+                                            id = pointId, name = name, latitude = lat, longitude = lon,
+                                            notes = notes, photoPath = photoPath
+                                        )
                                 )
                             }
                         },
