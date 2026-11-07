@@ -101,6 +101,13 @@ class MapStateStore(context: Context) {
     @Volatile var camera: CameraSnapshot? = null
     @Volatile var autoCenterPending: Boolean = true
 
+    /**
+     * Si el primer centrado automatico ya aplico un zoom razonable (con [camera] o con el primer GPS).
+     * En memoria, como [camera]: sobrevive a recrear la pantalla pero no al proceso, igual que la camara
+     * que describe, asi que arranca en true cuando ya hay una camara guardada con su propio zoom.
+     */
+    @Volatile var hasZoomedToLocation: Boolean = camera != null
+
     var lastLocation: LatLon?
         get() = if (prefs.contains(KEY_LAT) && prefs.contains(KEY_LON)) {
             LatLon(

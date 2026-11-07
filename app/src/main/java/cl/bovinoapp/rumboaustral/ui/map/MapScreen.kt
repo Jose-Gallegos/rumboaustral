@@ -226,18 +226,26 @@ fun MapScreen(
                 store.lastLocation = LatLon(known.latitude, known.longitude)
                 if (store.autoCenterPending) {
                     map.setCamera(cameraAt(known.latitude, known.longitude))
+                    store.hasZoomedToLocation = true
                 }
             }
         }
     }
 
-    // Centrado automatico: una sola vez con el primer GPS, salvo que el usuario ya haya movido el mapa.
+    // Centrado automatico: sigue cada fix de GPS mientras el modo seguimiento este activo (se desactiva
+    // al mover el mapa a mano y se reactiva al tocar el boton de "centrar en mi ubicacion"). El primer
+    // fix aplica tambien el zoom de cameraAt (por si el mapa arranco sin ubicacion previa, con el zoom
+    // por defecto); los siguientes solo mueven el centro, para no deshacer el zoom ya elegido.
     LaunchedEffect(currentLocation, map) {
         val loc = currentLocation ?: return@LaunchedEffect
         store.lastLocation = LatLon(loc.latitude, loc.longitude)
         if (store.autoCenterPending && map != null) {
-            map.setCamera(cameraAt(loc.latitude, loc.longitude))
-            store.autoCenterPending = false
+            if (store.hasZoomedToLocation) {
+                map.setCamera(CameraOptions.Builder().center(GeoPoint.fromLngLat(loc.longitude, loc.latitude)).build())
+            } else {
+                map.setCamera(cameraAt(loc.latitude, loc.longitude))
+                store.hasZoomedToLocation = true
+            }
         }
     }
 
@@ -330,20 +338,35 @@ fun MapScreen(
         manager.deleteAll()
     }
 
-    // Al iniciar la navegacion, encuadra mi ubicacion y el destino (una vez por destino).
+    // Al iniciar la navegacion, centra en mi ubicacion con el zoom justo para que el destino tambien se vea
+    // (una vez por destino). El reflejo del destino sobre mi ubicacion se calcula en coordenadas de pantalla
+    // (no en lat/lon directamente, que se distorsiona cerca de los polos y puede salirse del rango valido),
+    // asi el area que se encuadra queda centrada en mi posicion en vez de a medio camino entre ambos puntos.
     LaunchedEffect(targetPoint, navState.location != null, map) {
         val loc = navState.location
         if (map != null && loc != null && targetPoint != null && store.fittedTargetId != targetPoint.id) {
-            val camera = map.cameraForCoordinates(
+            val userCoord = GeoPoint.fromLngLat(loc.longitude, loc.latitude)
+            val userPixel = map.pixelForCoordinate(userCoord)
+            val targetPixel = map.pixelForCoordinate(GeoPoint.fromLngLat(targetPoint.longitude, targetPoint.latitude))
+            val mirrorPixel = ScreenCoordinate(
+                2 * userPixel.x - targetPixel.x,
+                2 * userPixel.y - targetPixel.y
+            )
+            val mirrorCoord = map.coordinateForPixel(mirrorPixel)
+            val fitted = map.cameraForCoordinates(
                 listOf(
-                    GeoPoint.fromLngLat(loc.longitude, loc.latitude),
-                    GeoPoint.fromLngLat(targetPoint.longitude, targetPoint.latitude)
+                    GeoPoint.fromLngLat(targetPoint.longitude, targetPoint.latitude),
+                    mirrorCoord
                 ),
                 CameraOptions.Builder().build(),
                 EdgeInsets(300.0, 150.0, 350.0, 150.0),
                 17.0,
                 null
             )
+            val camera = CameraOptions.Builder()
+                .center(userCoord)
+                .zoom(fitted.zoom)
+                .build()
             map.flyTo(camera, mapAnimationOptions { duration(800) })
             store.fittedTargetId = targetPoint.id
             store.autoCenterPending = false
@@ -773,6 +796,8 @@ fun MapScreen(
                             .build(),
                         mapAnimationOptions { duration(800) }
                     )
+                    // Reactiva el seguimiento: el mapa volvera a centrarse solo con cada fix de GPS.
+                    store.autoCenterPending = true
                 }
             }
         ) {
