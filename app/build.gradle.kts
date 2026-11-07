@@ -61,8 +61,12 @@ android {
     buildTypes {
         release {
             optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                // R8 rompe el SDK de Mapbox al minificar (IllegalAccessError en clases internas
+                // de kotlin.text, por una fusion de clases entre kotlin-stdlib y Mapbox que el
+                // consumer-proguard-rules de Mapbox no cubre). Esta es una app privada sin
+                // distribucion en Play Store: no hay necesidad real de minificar, asi que se
+                // desactiva en vez de perseguir reglas de ProGuard para un SDK de terceros.
+                enable = false
             }
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
