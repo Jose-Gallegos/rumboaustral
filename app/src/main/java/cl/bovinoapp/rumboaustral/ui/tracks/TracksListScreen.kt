@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cl.bovinoapp.rumboaustral.AppContainer
 import cl.bovinoapp.rumboaustral.data.Track
+import cl.bovinoapp.rumboaustral.location.TrackRecordingState
 import cl.bovinoapp.rumboaustral.share.ShareFiles
 import cl.bovinoapp.rumboaustral.ui.tracksViewModelFactory
 import kotlinx.coroutines.launch
@@ -50,6 +51,7 @@ private val DATE_FORMAT = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault
 fun TracksListScreen(container: AppContainer) {
     val viewModel: TracksViewModel = viewModel(factory = tracksViewModelFactory(container))
     val tracks by viewModel.tracks.collectAsState()
+    val recordingSnapshot by TrackRecordingState.snapshot.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var trackToRename by remember { mutableStateOf<Track?>(null) }
@@ -65,7 +67,7 @@ fun TracksListScreen(container: AppContainer) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (text.isNotBlank()) viewModel.rename(track, text)
+                    if (text.isNotBlank()) viewModel.rename(track.id, text)
                     trackToRename = null
                 }) { Text("Guardar") }
             },
@@ -99,19 +101,28 @@ fun TracksListScreen(container: AppContainer) {
         }
         LazyColumn(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
             items(tracks, key = { it.id }) { track ->
+                // Solo es "el" recorrido activo si el servicio esta grabando JUSTAMENTE este id. Un
+                // endedAt nulo sin eso es un recorrido interrumpido (p.ej. el proceso murio mientras
+                // grababa): no hay servicio escribiendole, asi que no hace falta bloquear su borrado.
+                val isActivelyRecording = track.endedAt == null && recordingSnapshot?.trackId == track.id
                 Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(track.name, style = MaterialTheme.typography.titleMedium)
                         Text(DATE_FORMAT.format(Date(track.startedAt)), style = MaterialTheme.typography.bodySmall)
-                        if (track.endedAt != null) {
-                            val durationMin = (track.endedAt - track.startedAt) / 60_000.0
-                            Text(
-                                "%.1f km · %.0f min · %.1f km/h promedio".format(
-                                    track.distanceMeters / 1000.0, durationMin, track.avgSpeedKmh
+                        when {
+                            track.endedAt != null -> {
+                                val durationMin = (track.endedAt - track.startedAt) / 60_000.0
+                                Text(
+                                    "%.1f km · %.0f min · %.1f km/h promedio".format(
+                                        track.distanceMeters / 1000.0, durationMin, track.avgSpeedKmh
+                                    )
                                 )
+                            }
+                            isActivelyRecording -> Text("Grabando...", color = MaterialTheme.colorScheme.primary)
+                            else -> Text(
+                                "Interrumpido (sin estadísticas)",
+                                color = MaterialTheme.colorScheme.error
                             )
-                        } else {
-                            Text("Grabando...", color = MaterialTheme.colorScheme.primary)
                         }
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                             IconButton(onClick = { trackToRename = track }) {
@@ -128,7 +139,7 @@ fun TracksListScreen(container: AppContainer) {
                             IconButton(
                                 // Mientras graba, el servicio sigue insertando TrackPoint con este trackId:
                                 // borrarlo ahora dejaria esas inserciones apuntando a un recorrido inexistente.
-                                enabled = track.endedAt != null,
+                                enabled = !isActivelyRecording,
                                 onClick = { trackToDelete = track }
                             ) {
                                 Icon(Icons.Filled.Delete, contentDescription = "Eliminar")

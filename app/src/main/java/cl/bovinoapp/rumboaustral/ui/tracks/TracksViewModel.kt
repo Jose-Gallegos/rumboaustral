@@ -14,8 +14,8 @@ class TracksViewModel(private val repository: TracksRepository) : ViewModel() {
     val tracks: StateFlow<List<Track>> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun rename(track: Track, name: String) {
-        viewModelScope.launch { repository.rename(track, name) }
+    fun rename(trackId: Long, name: String) {
+        viewModelScope.launch { repository.rename(trackId, name) }
     }
 
     fun delete(track: Track) {

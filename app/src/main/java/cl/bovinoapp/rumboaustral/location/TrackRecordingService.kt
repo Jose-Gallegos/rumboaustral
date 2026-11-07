@@ -51,6 +51,13 @@ class TrackRecordingService : Service() {
     // en paralelo con un appendPoints() todavia pendiente del ultimo fix (perderia ese punto,
     // o peor, onDestroy() podria cancelar esa insercion al detener el servicio).
     private var pendingWrites: Job? = null
+    // true desde que se acepta un ACTION_START hasta que termina el ACTION_STOP correspondiente.
+    // onStartCommand corre siempre en el hilo principal y de a uno por Intent, asi que esta
+    // bandera alcanza para que un doble toque en "grabar" no cree dos recorridos a la vez.
+    private var isRecording = false
+    // Se activa al pedir "Detener": bloquea nuevas escrituras desde onNewFix aunque todavia
+    // lleguen fixes mientras se espera que termine lo ya encolado.
+    private var isStopping = false
 
     private fun enqueueWrite(block: suspend () -> Unit) {
         val previous = pendingWrites
@@ -70,8 +77,16 @@ class TrackRecordingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startRecording(intent.getStringExtra(EXTRA_NAME) ?: "Recorrido")
-            ACTION_STOP -> stopRecording()
+            // isRecording sigue en true durante todo el cierre (se apaga recien al terminar
+            // stopRecording, no aca): asi un inicio que llegue mientras el cierre anterior
+            // todavia esta en curso no reinicia trackId/isStopping a mitad de camino.
+            ACTION_START -> if (!isRecording && !isStopping) {
+                isRecording = true
+                startRecording(intent.getStringExtra(EXTRA_NAME) ?: "Recorrido")
+            }
+            ACTION_STOP -> if (isRecording && !isStopping) {
+                stopRecording()
+            }
         }
         return START_NOT_STICKY
     }
@@ -91,16 +106,34 @@ class TrackRecordingService : Service() {
         distanceMeters = 0.0
         lastFix = null
         trackId = 0
+        // isStopping no hace falta resetearlo aca: onStartCommand ya rechaza un ACTION_START
+        // mientras isStopping sea true, asi que si llegamos aca siempre esta en false.
+        // startForeground() va primero e incondicional: Android exige llamarlo enseguida tras
+        // startForegroundService(), sin importar lo que pase despues (si no, se cae con una ANR).
         startForeground(NOTIFICATION_ID, buildNotification(name, 0.0))
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        // El resto de la app (MainActivity) deja entrar con ubicacion aproximada o precisa: exigir
+        // solo la precisa aca hacia que el boton de grabar pareciera no hacer nada para quien solo
+        // concedio la aproximada. Se graba con la que haya (menos precision, pero funciona).
+        val hasLocationPermission =
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (!hasLocationPermission) {
+            isRecording = false
+            android.widget.Toast.makeText(
+                this, "Sin permiso de ubicación: no se puede grabar el recorrido", android.widget.Toast.LENGTH_LONG
+            ).show()
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
         // El GPS no debe suscribirse hasta tener el ID persistido: un fix que llegara antes
         // intentaria insertar un TrackPoint con trackId = 0, inexistente, y violaria la clave foranea.
-        scope.launch {
+        // Se encola en la misma cadena que las escrituras de puntos (en vez de un scope.launch aparte)
+        // para que "Detener" (que espera el ultimo eslabon de esa cadena) nunca lea trackId = 0 por
+        // haberse ejecutado antes de que esto termine.
+        enqueueWrite {
             trackId = repository.startTrack(name, startedAt)
             TrackRecordingState.update(TrackRecordingState.Snapshot(trackId, name, 0.0, startedAt))
             startLocationUpdates(name)
@@ -123,6 +156,10 @@ class TrackRecordingService : Service() {
     }
 
     private fun onNewFix(name: String, latitude: Double, longitude: Double, timestamp: Long) {
+        // onLocationResult y onStartCommand corren siempre en el hilo principal: una vez que
+        // stopRecording() marca isStopping, ningun fix posterior (en ese mismo hilo) vuelve a encolar
+        // una escritura, sin importar cuanto tarde en resolverse la cadena ya encolada.
+        if (isStopping) return
         val point = TrackPoint(
             trackId = trackId, latitude = latitude, longitude = longitude,
             timestampMillis = timestamp, sequence = sequence++
@@ -137,21 +174,32 @@ class TrackRecordingService : Service() {
     }
 
     private fun stopRecording() {
-        callback?.let { fusedClient.removeLocationUpdates(it) }
-        callback = null
-        val id = trackId
+        // Orden exacto: (1) bloquear fixes nuevos ANTES que nada, (2) esperar lo ya encolado (el
+        // inicio, si todavia estaba en curso, mas cualquier fix que alcanzo a entrar antes del
+        // bloqueo), (3) recien ahi retirar la suscripcion al GPS, (4) drenar lo que se haya
+        // encolado mientras se esperaba/desuscribia, y solo entonces calcular las estadisticas
+        // finales. stopSelf() se llama al final: onDestroy() cancela este mismo scope, asi que
+        // detener el servicio antes le cortaria el guardado.
+        isStopping = true
         val endedAt = System.currentTimeMillis()
-        // stopSelf() se llama DESPUES de terminar de guardar: onDestroy() cancela este mismo scope,
-        // asi que detener el servicio antes de que finishTrack termine le cortaria el guardado final.
-        // Tambien se espera la cadena de escrituras pendientes, para no calcular estadisticas sin el
-        // ultimo fix ni cancelar su insercion a mitad de camino.
-        val lastWrite = pendingWrites
+        val writesBeforeStop = pendingWrites
         scope.launch {
-            lastWrite?.join()
+            writesBeforeStop?.join()
+            callback?.let { fusedClient.removeLocationUpdates(it) }
+            callback = null
+            pendingWrites?.join()
+            val id = trackId
             if (id != 0L) {
                 repository.finishTrack(id, endedAt)
                 TrackRecordingState.update(null)
             }
+            // isStopping/isRecording NO se resetean aca: esta corrutina corre en Dispatchers.IO, y
+            // stopSelf() solo PIDE destruir el servicio (no es inmediato) - onStartCommand sigue
+            // corriendo en el hilo principal mientras tanto. Si se liberaran aca, un ACTION_START
+            // que llegara justo en ese hueco reusaria esta misma instancia (y su mismo "scope"), y
+            // cuando Android recien destruya esta instancia, onDestroy() cancelaria el scope y se
+            // llevaria puesta la grabacion nueva. Se quedan en true hasta que onDestroy() se lleve
+            // la instancia entera: la siguiente instancia (si hay una) arranca sus campos en false.
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }

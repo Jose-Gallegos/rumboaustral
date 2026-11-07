@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import cl.bovinoapp.rumboaustral.photos.PhotoStorage
 import cl.bovinoapp.rumboaustral.share.ShareFiles
+import androidx.compose.runtime.saveable.rememberSaveable
 import coil.compose.AsyncImage
 import java.io.File
 
@@ -88,12 +89,18 @@ fun PointEditScreen(
     var name by remember { mutableStateOf("") }
     var nameEdited by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
-    var photoPath by remember { mutableStateOf<String?>(null) }
+    // rememberSaveable: sobrevive a que la actividad se recree (p.ej. mientras la camara esta abierta)
+    // sin perder una foto recien capturada.
+    var photoPath by rememberSaveable { mutableStateOf<String?>(null) }
     // La foto que la base todavia referencia (la del punto cargado). Si se reemplaza o quita en el
     // formulario, el archivo viejo no se borra al toque: recien se borra tras guardar con exito, para
     // no dejar la base apuntando a un archivo ya eliminado si se sale del formulario sin guardar.
-    var originalPhotoPath by remember { mutableStateOf<String?>(null) }
+    var originalPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingOldPhotoToDelete by remember { mutableStateOf<String?>(null) }
+    // Una vez cargada la foto del punto desde la base no se la vuelve a tocar: si la actividad se
+    // recrea mientras la camara esta abierta, la lectura asincrona de LaunchedEffect(pointId) podria
+    // terminar DESPUES de que llegue la foto nueva y pisarla de vuelta con la vieja.
+    var photoLoadedFromDb by rememberSaveable { mutableStateOf(false) }
     fun replacePhoto(newPath: String?) {
         val old = photoPath
         photoPath = newPath
@@ -112,20 +119,24 @@ fun PointEditScreen(
         originalPhotoPath = photoPath
     }
     val context = LocalContext.current
-    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
+    // Ruta (no el File): rememberSaveable necesita un tipo parcelable/serializable simple, y asi
+    // sobrevive a que la actividad se recree mientras la camara esta abierta (p.ej. por rotacion o
+    // por falta de memoria) sin perder la foto que ya se tomo cuando llega el resultado.
+    var pendingCaptureFilePath by rememberSaveable { mutableStateOf<String?>(null) }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        val file = pendingCaptureFile
+        val file = pendingCaptureFilePath?.let { File(it) }
         if (success && file != null) {
             PhotoStorage.downscaleInPlace(file)
             replacePhoto(file.absolutePath)
         }
+        pendingCaptureFilePath = null
     }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             val (file, uri) = PhotoStorage.newCaptureTarget(context)
-            pendingCaptureFile = file
+            pendingCaptureFilePath = file.absolutePath
             cameraLauncher.launch(uri)
         }
     }
@@ -202,8 +213,11 @@ fun PointEditScreen(
             viewModel.pointById(pointId)?.let { point ->
                 name = point.name
                 notes = point.notes
-                photoPath = point.photoPath
-                originalPhotoPath = point.photoPath
+                if (!photoLoadedFromDb) {
+                    photoPath = point.photoPath
+                    originalPhotoPath = point.photoPath
+                    photoLoadedFromDb = true
+                }
                 latitudeText = point.latitude.toString()
                 longitudeText = point.longitude.toString()
                 LabelKind.entries.forEach { selection[it] = point.labelIdFor(it) }
@@ -337,7 +351,7 @@ fun PointEditScreen(
                                     PackageManager.PERMISSION_GRANTED
                                 ) {
                                     val (file, uri) = PhotoStorage.newCaptureTarget(context)
-                                    pendingCaptureFile = file
+                                    pendingCaptureFilePath = file.absolutePath
                                     cameraLauncher.launch(uri)
                                 } else {
                                     cameraPermissionLauncher.launch(Manifest.permission.CAMERA)

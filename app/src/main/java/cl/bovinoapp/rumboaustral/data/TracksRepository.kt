@@ -17,7 +17,10 @@ class TracksRepository(private val dao: TrackDao) {
 
     suspend fun getTrackPoints(trackId: Long): List<TrackPoint> = dao.getTrackPoints(trackId)
 
-    suspend fun rename(track: Track, name: String) = dao.updateTrack(track.copy(name = name))
+    // Por ID y solo el nombre: el Track que tiene la pantalla pudo quedar desactualizado (p.ej. si el
+    // recorrido se detuvo mientras el dialogo de renombrar estaba abierto), y copiar ese Track entero
+    // pisaria endedAt/distancia/velocidad ya calculados con los valores viejos (anteriores a terminar).
+    suspend fun rename(trackId: Long, name: String) = dao.renameTrack(trackId, name)
 
     suspend fun delete(id: Long) = dao.deleteTrack(id)
 
