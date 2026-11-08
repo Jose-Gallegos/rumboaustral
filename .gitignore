@@ -17,3 +17,4 @@ local.properties
 # Archivos de sesion del compilador de Kotlin
 .kotlin/
 .idea/misc.xml
+/backup

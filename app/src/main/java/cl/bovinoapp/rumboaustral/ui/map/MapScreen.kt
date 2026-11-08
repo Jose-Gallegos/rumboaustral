@@ -481,9 +481,19 @@ fun MapScreen(
     // Al llegar la cruz a un punto distinto, ese punto pasa a ser el seleccionado (como si se tocara). Un toque
     // posterior sobre otro waypoint lo reemplaza, y cerrar el panel funciona aunque la cruz siga encima.
     // Mientras se mide, la cruz no selecciona: su panel taparía la medición que se está haciendo con ella.
+    // Al salir la cruz de un punto que ella misma seleccionó, se libera la selección (no así si el punto
+    // seleccionado vino de un toque directo sobre otro waypoint).
     val isMeasuring = measureOrigin != null
+    val lastCrosshairPointId = remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(crosshairPoint?.id, isMeasuring) {
-        if (!isMeasuring) crosshairPoint?.let { selectedPointId.value = it.id }
+        if (isMeasuring) return@LaunchedEffect
+        if (crosshairPoint != null) {
+            selectedPointId.value = crosshairPoint.id
+            lastCrosshairPointId.value = crosshairPoint.id
+        } else if (selectedPointId.value != null && selectedPointId.value == lastCrosshairPointId.value) {
+            selectedPointId.value = null
+            lastCrosshairPointId.value = null
+        }
     }
     val highlightManager = highlightManagerRef.value
     // El resaltado sigue al punto seleccionado (bajo la cruz o tocado), igual que el panel.
