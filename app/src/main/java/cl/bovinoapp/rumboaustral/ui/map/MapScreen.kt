@@ -112,13 +112,7 @@ import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.scalebar.scalebar
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import cl.bovinoapp.rumboaustral.location.TrackRecordingService
 import cl.bovinoapp.rumboaustral.location.TrackRecordingState
 import java.text.SimpleDateFormat
@@ -247,9 +241,6 @@ fun MapScreen(
     // se observa para mostrar el chip de progreso y decidir si el FAB inicia o detiene.
     val mapContext = LocalContext.current
     val recordingSnapshot by TrackRecordingState.snapshot.collectAsState()
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* si se niega, el servicio igual graba, solo sin notificacion visible */ }
 
     // Sin camara guardada y sin GPS aun: usar la ultima ubicacion conocida del sistema
     // si nunca habiamos guardado una propia.
@@ -947,12 +938,6 @@ fun MapScreen(
                 if (recordingSnapshot != null) {
                     TrackRecordingService.stop(mapContext)
                 } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(mapContext, Manifest.permission.POST_NOTIFICATIONS) !=
-                        PackageManager.PERMISSION_GRANTED
-                    ) {
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
                     val name = "Recorrido " + SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
                     TrackRecordingService.start(mapContext, name)
                 }
