@@ -134,14 +134,7 @@ class PointsViewModel(
 
     suspend fun pointById(id: Long): Point? = repository.getById(id)
 
-    /** Siguiente nombre libre con el formato "Waypoint N" (N = mayor sufijo existente + 1). */
-    suspend fun nextDefaultName(): String {
-        val regex = Regex("^Waypoint (\\d+)$", RegexOption.IGNORE_CASE)
-        val max = repository.observeAll().first()
-            .mapNotNull { regex.find(it.name.trim())?.groupValues?.get(1)?.toIntOrNull() }
-            .maxOrNull() ?: 0
-        return "Waypoint ${max + 1}"
-    }
+    suspend fun nextDefaultName(): String = repository.nextDefaultName()
 
     /** Respaldo GPX de TODOS los puntos (sin aplicar el filtro del buscador). */
     fun exportGpx(open: () -> OutputStream?) {

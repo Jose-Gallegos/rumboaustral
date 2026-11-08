@@ -15,6 +15,7 @@ import cl.bovinoapp.rumboaustral.data.labelIdFor
 import cl.bovinoapp.rumboaustral.location.LocationState
 import cl.bovinoapp.rumboaustral.location.SatelliteStatus
 import cl.bovinoapp.rumboaustral.location.LocationTracker
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -80,9 +81,26 @@ class MapViewModel(
         viewModelScope.launch { pointsRepository.delete(point) }
     }
 
-    fun saveNewPoint(name: String, latitude: Double, longitude: Double, notes: String = "") {
+    fun saveNewPoint(
+        name: String,
+        latitude: Double,
+        longitude: Double,
+        notes: String = "",
+        onError: (Throwable) -> Unit = {},
+        onSaved: (Long) -> Unit = {}
+    ) {
         viewModelScope.launch {
-            pointsRepository.save(Point(name = name, latitude = latitude, longitude = longitude, notes = notes))
+            val id = try {
+                pointsRepository.save(Point(name = name, latitude = latitude, longitude = longitude, notes = notes))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onError(e)
+                return@launch
+            }
+            onSaved(id)
         }
     }
+
+    suspend fun nextDefaultName(): String = pointsRepository.nextDefaultName()
 }
