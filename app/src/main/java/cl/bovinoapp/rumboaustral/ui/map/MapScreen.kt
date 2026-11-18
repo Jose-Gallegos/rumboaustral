@@ -1,6 +1,7 @@
 package cl.bovinoapp.rumboaustral.ui.map
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
@@ -112,13 +113,7 @@ import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.scalebar.scalebar
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import cl.bovinoapp.rumboaustral.location.TrackRecordingService
 import cl.bovinoapp.rumboaustral.location.TrackRecordingState
 import java.text.SimpleDateFormat
@@ -215,6 +210,20 @@ fun MapScreen(
     val selectedPointId = remember { mutableStateOf<Long?>(null) }
     val pointToDelete = remember { mutableStateOf<Point?>(null) }
     val selectedPoint = remember(points, selectedPointId.value) { points.firstOrNull { it.id == selectedPointId.value } }
+    // Waypoint que la cruz central seleccionó por sí sola (no un toque directo); null si la selección
+    // vigente vino de tocar un marcador o de ninguna de las dos.
+    val lastCrosshairPointId = remember { mutableStateOf<Long?>(null) }
+
+    // Waypoint por crear (tocado con el FAB o con una pulsación larga): se muestra primero la tarjeta de
+    // confirmación, igual que la de un punto ya guardado, para no forzar la entrada al formulario completo.
+    val pendingNewPoint = remember { mutableStateOf<LatLon?>(null) }
+    val pendingNewPointName = remember { mutableStateOf<String?>(null) }
+    val savingNewPoint = remember { mutableStateOf(false) }
+    val newPointError = remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingNewPoint.value) {
+        newPointError.value = null
+        pendingNewPointName.value = pendingNewPoint.value?.let { viewModel.nextDefaultName() }
+    }
 
     val annotationManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
@@ -236,9 +245,6 @@ fun MapScreen(
     // se observa para mostrar el chip de progreso y decidir si el FAB inicia o detiene.
     val mapContext = LocalContext.current
     val recordingSnapshot by TrackRecordingState.snapshot.collectAsState()
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* si se niega, el servicio igual graba, solo sin notificacion visible */ }
 
     // Trazo del recorrido en curso, redibujado con cada fix nuevo.
     val trackManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
@@ -495,7 +501,12 @@ fun MapScreen(
             )
         )
         manager.addClickListener(OnPointAnnotationClickListener { annotation ->
+            // Mientras se guarda el punto pendiente no se admite otra selección: su onSaved cerraría esta.
+            if (savingNewPoint.value) return@OnPointAnnotationClickListener true
             selectedPointId.value = annotation.getData()?.asLong
+            // Toque directo: aunque la cruz esté sobre el mismo punto, que no se cierre solo al alejarla.
+            lastCrosshairPointId.value = null
+            pendingNewPoint.value = null
             true
         })
         // Tocar un grupo acerca el mapa a él para que se separe en grupos más chicos o puntos sueltos.
@@ -546,9 +557,18 @@ fun MapScreen(
     // Al llegar la cruz a un punto distinto, ese punto pasa a ser el seleccionado (como si se tocara). Un toque
     // posterior sobre otro waypoint lo reemplaza, y cerrar el panel funciona aunque la cruz siga encima.
     // Mientras se mide, la cruz no selecciona: su panel taparía la medición que se está haciendo con ella.
+    // Al salir la cruz de un punto que ella misma seleccionó, se libera la selección (no así si el punto
+    // seleccionado vino de un toque directo sobre otro waypoint).
     val isMeasuring = measureOrigin != null
-    LaunchedEffect(crosshairPoint?.id, isMeasuring) {
-        if (!isMeasuring) crosshairPoint?.let { selectedPointId.value = it.id }
+    LaunchedEffect(crosshairPoint?.id, isMeasuring, pendingNewPoint.value) {
+        if (isMeasuring || pendingNewPoint.value != null) return@LaunchedEffect
+        if (crosshairPoint != null) {
+            selectedPointId.value = crosshairPoint.id
+            lastCrosshairPointId.value = crosshairPoint.id
+        } else if (selectedPointId.value != null && selectedPointId.value == lastCrosshairPointId.value) {
+            selectedPointId.value = null
+            lastCrosshairPointId.value = null
+        }
     }
     val highlightManager = highlightManagerRef.value
     // El resaltado sigue al punto seleccionado (bajo la cruz o tocado), igual que el panel.
@@ -639,7 +659,9 @@ fun MapScreen(
                     // El administrador de marcadores se crea aparte (según el agrupamiento elegido); al crearse
                     // después queda sobre la línea de navegación, igual que antes.
                     gestures.addOnMapClickListener(OnMapClickListener {
+                        if (savingNewPoint.value) return@OnMapClickListener false
                         selectedPointId.value = null
+                        pendingNewPoint.value = null
                         false
                     })
                     gestures.addOnMoveListener(object : OnMoveListener {
@@ -650,7 +672,9 @@ fun MapScreen(
                         override fun onMoveEnd(detector: MoveGestureDetector) {}
                     })
                     gestures.addOnMapLongClickListener(OnMapLongClickListener { clicked ->
-                        onAddPointAt(clicked.latitude(), clicked.longitude())
+                        if (savingNewPoint.value) return@OnMapLongClickListener true
+                        selectedPointId.value = null
+                        pendingNewPoint.value = LatLon(clicked.latitude(), clicked.longitude())
                         true
                     })
                 }
@@ -850,6 +874,87 @@ fun MapScreen(
             }
         }
 
+        pendingNewPoint.value?.let { target ->
+            val name = pendingNewPointName.value
+            Card(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 16.dp, bottom = 24.dp, end = 104.dp)
+                    .fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 4.dp)) {
+                    Text(
+                        name ?: "Nuevo waypoint",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    currentLocation?.let {
+                        Text(
+                            formatDistance(distanceMeters(it.latitude, it.longitude, target.latitude, target.longitude)),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    newPointError.value?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    val buttonSize = Modifier.size(40.dp)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        IconButton(
+                            modifier = buttonSize,
+                            enabled = name != null && !savingNewPoint.value,
+                            onClick = {
+                                val pointName = name ?: return@IconButton
+                                savingNewPoint.value = true
+                                newPointError.value = null
+                                viewModel.saveNewPoint(
+                                    pointName, target.latitude, target.longitude,
+                                    onError = {
+                                        savingNewPoint.value = false
+                                        newPointError.value = "No se pudo guardar el punto"
+                                    },
+                                    onSaved = { id ->
+                                        savingNewPoint.value = false
+                                        selectedPointId.value = id
+                                        pendingNewPoint.value = null
+                                    }
+                                )
+                            }
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = "Grabar")
+                        }
+                        IconButton(
+                            modifier = buttonSize,
+                            enabled = !savingNewPoint.value,
+                            onClick = {
+                                store.startMeasure(name ?: "Nuevo waypoint", target.latitude, target.longitude)
+                                pendingNewPoint.value = null
+                            }
+                        ) {
+                            Icon(Icons.Filled.Straighten, contentDescription = "Medir desde aquí")
+                        }
+                        IconButton(
+                            modifier = buttonSize,
+                            enabled = !savingNewPoint.value,
+                            onClick = {
+                                onAddPointAt(target.latitude, target.longitude)
+                                pendingNewPoint.value = null
+                            }
+                        ) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Editar")
+                        }
+                        IconButton(
+                            modifier = buttonSize,
+                            enabled = !savingNewPoint.value,
+                            onClick = { pendingNewPoint.value = null }
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancelar")
+                        }
+                    }
+                }
+            }
+        }
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -864,8 +969,10 @@ fun MapScreen(
 
         FloatingActionButton(
             onClick = {
+                if (savingNewPoint.value) return@FloatingActionButton
                 mapViewRef.value?.mapboxMap?.cameraState?.center?.let {
-                    onAddPointAt(it.latitude(), it.longitude())
+                    selectedPointId.value = null
+                    pendingNewPoint.value = LatLon(it.latitude(), it.longitude())
                 }
             }
         ) {
@@ -897,12 +1004,6 @@ fun MapScreen(
                 if (recordingSnapshot != null) {
                     TrackRecordingService.stop(mapContext)
                 } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(mapContext, Manifest.permission.POST_NOTIFICATIONS) !=
-                        PackageManager.PERMISSION_GRANTED
-                    ) {
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
                     val name = "Recorrido " + SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
                     TrackRecordingService.start(mapContext, name)
                 }

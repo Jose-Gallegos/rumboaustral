@@ -1,6 +1,7 @@
 package cl.bovinoapp.rumboaustral.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 class PointsRepository(private val dao: PointDao) {
     fun observeAll(): Flow<List<Point>> = dao.observeAll()
@@ -8,6 +9,15 @@ class PointsRepository(private val dao: PointDao) {
     suspend fun getById(id: Long): Point? = dao.getById(id)
 
     suspend fun save(point: Point): Long = dao.insert(point)
+
+    /** Siguiente nombre libre con el formato "Waypoint N" (N = mayor sufijo existente + 1). */
+    suspend fun nextDefaultName(): String {
+        val regex = Regex("^Waypoint (\\d+)$", RegexOption.IGNORE_CASE)
+        val max = observeAll().first()
+            .mapNotNull { regex.find(it.name.trim())?.groupValues?.get(1)?.toIntOrNull() }
+            .maxOrNull() ?: 0
+        return "Waypoint ${max + 1}"
+    }
 
     suspend fun update(point: Point) = dao.update(point)
 
