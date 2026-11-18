@@ -167,6 +167,8 @@ class TrackRecordingService : Service() {
         lastFix?.let { (lat, lon) -> distanceMeters += distanceMeters(lat, lon, latitude, longitude) }
         lastFix = latitude to longitude
         enqueueWrite { repository.appendPoints(listOf(point)) }
+        // Solo si ya hay snapshot (el recorrido ya existe): evita trazos huérfanos al iniciar/detener.
+        if (TrackRecordingState.snapshot.value != null) TrackRecordingState.appendToPath(latitude, longitude)
         TrackRecordingState.snapshot.value?.let {
             TrackRecordingState.update(it.copy(distanceMeters = distanceMeters))
         }

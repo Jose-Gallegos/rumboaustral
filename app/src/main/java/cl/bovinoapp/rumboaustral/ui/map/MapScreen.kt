@@ -37,6 +37,7 @@ import com.mapbox.maps.plugin.annotation.AnnotationConfig
 import com.mapbox.maps.plugin.annotation.AnnotationSourceOptions
 import com.mapbox.maps.plugin.annotation.ClusterOptions
 import com.mapbox.maps.plugin.annotation.OnClusterClickListener
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
@@ -131,6 +132,9 @@ private val CLUSTER_COLOR_LARGE = 0xFF263238.toInt()
 
 /** ID de la capa de símbolos de los marcadores de puntos (los grupos usan capas aparte, con otros IDs). */
 private const val POINTS_LAYER_ID = "rumbo-points-layer"
+
+/** Máximo de puntos por segmento del trazo en vivo: acota lo que se copia y reenvía a Mapbox en cada fix. */
+private const val TRACK_SEGMENT_MAX_POINTS = 200
 
 /** Radio, en dp alrededor de la cruz central, dentro del cual un punto suelto se resalta. */
 private const val CROSSHAIR_RADIUS_DP = 20f
@@ -235,6 +239,67 @@ fun MapScreen(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* si se niega, el servicio igual graba, solo sin notificacion visible */ }
+
+    // Trazo del recorrido en curso, redibujado con cada fix nuevo.
+    val trackManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
+    val pathVersion by TrackRecordingState.pathVersion.collectAsState()
+    // Dibujo incremental por segmentos: el trazo se parte en líneas de hasta TRACK_SEGMENT_MAX_POINTS puntos. Solo
+    // se modifica el segmento abierto (copia acotada); los completos no se vuelven a tocar. Cada segmento nuevo
+    // arranca en el último punto del anterior para que no queden huecos. Se redibuja desde cero solo si el trazo
+    // se reinició o el administrador es otro.
+    val trackDrawn = remember {
+        object {
+            var manager: PolylineAnnotationManager? = null
+            var line: PolylineAnnotation? = null
+            var segmentLength = 0
+            var last: GeoPoint? = null
+            var count = 0
+        }
+    }
+    LaunchedEffect(pathVersion, trackManagerRef.value) {
+        val manager = trackManagerRef.value ?: return@LaunchedEffect
+        val size = TrackRecordingState.pathSize()
+        if (trackDrawn.manager !== manager || size < trackDrawn.count) {
+            manager.deleteAll()
+            trackDrawn.manager = manager
+            trackDrawn.line = null
+            trackDrawn.segmentLength = 0
+            trackDrawn.last = null
+            trackDrawn.count = 0
+        }
+        if (size < 2 || size == trackDrawn.count) return@LaunchedEffect
+        val pending = TrackRecordingState.pathFrom(trackDrawn.count)
+            .map { (lat, lon) -> GeoPoint.fromLngLat(lon, lat) }
+        trackDrawn.count = size
+        var index = 0
+        while (index < pending.size) {
+            val line = trackDrawn.line
+            val taken: List<GeoPoint>
+            if (line == null || trackDrawn.segmentLength >= TRACK_SEGMENT_MAX_POINTS) {
+                // El punto de enlace con el segmento anterior cuenta dentro del cupo.
+                val link = trackDrawn.last
+                val room = TRACK_SEGMENT_MAX_POINTS - if (link != null) 1 else 0
+                taken = pending.subList(index, minOf(index + room, pending.size))
+                val points = listOfNotNull(link) + taken
+                trackDrawn.line = manager.create(
+                    PolylineAnnotationOptions()
+                        .withPoints(points)
+                        .withLineColor("#FF1744")
+                        .withLineWidth(4.0)
+                )
+                trackDrawn.segmentLength = points.size
+            } else {
+                taken = pending.subList(
+                    index, minOf(index + TRACK_SEGMENT_MAX_POINTS - trackDrawn.segmentLength, pending.size)
+                )
+                line.points = line.points + taken
+                manager.update(line)
+                trackDrawn.segmentLength += taken.size
+            }
+            trackDrawn.last = taken.last()
+            index += taken.size
+        }
+    }
 
     // Sin camara guardada y sin GPS aun: usar la ultima ubicacion conocida del sistema
     // si nunca habiamos guardado una propia.
@@ -565,6 +630,7 @@ fun MapScreen(
                     // Mapbox elige las unidades según la región del teléfono (aquí salía en ft y millas): siempre métrica.
                     scalebar.updateSettings { isMetricUnits = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
+                    trackManagerRef.value = annotations.createPolylineAnnotationManager()
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
                     courseManagerRef.value = annotations.createPolylineAnnotationManager()
                     measureManagerRef.value = annotations.createPolylineAnnotationManager()
