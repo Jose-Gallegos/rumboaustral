@@ -3,6 +3,7 @@ package cl.bovinoapp.rumboaustral.map
 import android.content.Context
 import cl.bovinoapp.rumboaustral.data.Point
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 
 data class CameraSnapshot(val latitude: Double, val longitude: Double, val zoom: Double)
 
@@ -48,6 +49,27 @@ class MapStateStore(context: Context) {
 
     fun stopMeasure() {
         measureOrigin.value = null
+    }
+
+    /** Recorridos guardados que se muestran en el mapa. Solo en memoria: al reiniciar la app se vuelve a un mapa limpio. */
+    val visibleTrackIds = MutableStateFlow<Set<Long>>(emptySet())
+
+    /** Recorrido que el mapa debe encuadrar al mostrarse (se consume con [consumeTrackFit]). */
+    val trackToFit = MutableStateFlow<Long?>(null)
+
+    /** Muestra un recorrido guardado y pide encuadrarlo. Idempotente: repetirlo no lo oculta. */
+    fun showTrack(id: Long) {
+        visibleTrackIds.update { it + id }
+        trackToFit.value = id
+    }
+
+    /** Oculta un recorrido guardado. Idempotente. */
+    fun hideTrack(id: Long) {
+        visibleTrackIds.update { it - id }
+    }
+
+    fun consumeTrackFit(id: Long) {
+        if (trackToFit.value == id) trackToFit.value = null
     }
 
     /** Si el mapa agrupa los marcadores cercanos en círculos con su cantidad. Elección del usuario, persistida; por defecto no. */

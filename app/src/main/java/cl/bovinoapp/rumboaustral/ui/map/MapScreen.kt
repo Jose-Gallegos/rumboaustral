@@ -38,6 +38,9 @@ import com.mapbox.maps.plugin.annotation.AnnotationConfig
 import com.mapbox.maps.plugin.annotation.AnnotationSourceOptions
 import com.mapbox.maps.plugin.annotation.ClusterOptions
 import com.mapbox.maps.plugin.annotation.OnClusterClickListener
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
@@ -127,6 +130,9 @@ private val CLUSTER_COLOR_LARGE = 0xFF263238.toInt()
 
 /** ID de la capa de símbolos de los marcadores de puntos (los grupos usan capas aparte, con otros IDs). */
 private const val POINTS_LAYER_ID = "rumbo-points-layer"
+
+/** Colores de los recorridos guardados (sin rojo, que es el del recorrido en vivo, ni amarillo, el de la navegación). */
+private val SAVED_TRACK_COLORS = listOf("#2979FF", "#D500F9", "#FF9100", "#00E5FF", "#76FF03", "#FF4081")
 
 /** Máximo de puntos por segmento del trazo en vivo: acota lo que se copia y reenvía a Mapbox en cada fix. */
 private const val TRACK_SEGMENT_MAX_POINTS = 200
@@ -305,6 +311,61 @@ fun MapScreen(
             trackDrawn.last = taken.last()
             index += taken.size
         }
+    }
+
+    // Recorridos guardados que el usuario eligio ver: una linea por recorrido, con un color propio. Los puntos de un
+    // recorrido terminado no cambian, asi que se cachean por ID.
+    val savedTracksManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
+    val visibleTrackIds by store.visibleTrackIds.collectAsState()
+    val savedTrackPoints = remember { HashMap<Long, List<GeoPoint>>() }
+    suspend fun pointsOfTrack(id: Long): List<GeoPoint> = savedTrackPoints[id]
+        ?: container.tracksRepository.getTrackPoints(id)
+            .map { GeoPoint.fromLngLat(it.longitude, it.latitude) }
+            .also { if (it.isNotEmpty()) savedTrackPoints[id] = it }
+    // Un recorrido de un solo punto (se detuvo antes del segundo fix de GPS) no forma una linea: se dibuja como un
+    // punto, con el mismo color que tendria su linea.
+    val savedDotsManagerRef = remember { mutableStateOf<CircleAnnotationManager?>(null) }
+    LaunchedEffect(visibleTrackIds, savedTracksManagerRef.value, savedDotsManagerRef.value) {
+        val manager = savedTracksManagerRef.value ?: return@LaunchedEffect
+        val dotsManager = savedDotsManagerRef.value ?: return@LaunchedEffect
+        val lines = ArrayList<PolylineAnnotationOptions>()
+        val dots = ArrayList<CircleAnnotationOptions>()
+        for (id in visibleTrackIds.sorted()) {
+            val points = pointsOfTrack(id)
+            val color = SAVED_TRACK_COLORS[(id % SAVED_TRACK_COLORS.size).toInt()]
+            when {
+                points.size >= 2 -> lines += PolylineAnnotationOptions()
+                    .withPoints(points)
+                    .withLineColor(color)
+                    .withLineWidth(4.0)
+                points.size == 1 -> dots += CircleAnnotationOptions()
+                    .withPoint(points[0])
+                    .withCircleRadius(7.0)
+                    .withCircleColor(color)
+                    .withCircleStrokeColor("#FFFFFF")
+                    .withCircleStrokeWidth(2.0)
+            }
+        }
+        manager.deleteAll()
+        dotsManager.deleteAll()
+        if (lines.isNotEmpty()) manager.create(lines)
+        if (dots.isNotEmpty()) dotsManager.create(dots)
+    }
+    // Al pedir "ver en el mapa" desde la lista, la camara encuadra ese recorrido completo.
+    val trackToFit by store.trackToFit.collectAsState()
+    LaunchedEffect(trackToFit, map) {
+        val id = trackToFit ?: return@LaunchedEffect
+        val mapboxMap = map ?: return@LaunchedEffect
+        val points = pointsOfTrack(id)
+        if (points.isNotEmpty()) {
+            val camera = mapboxMap.cameraForCoordinates(
+                points, CameraOptions.Builder().build(), EdgeInsets(150.0, 100.0, 250.0, 100.0), 17.0, null
+            )
+            // Sin seguimiento automatico, o el siguiente fix de GPS devolveria la camara a mi posicion.
+            store.autoCenterPending = false
+            mapboxMap.flyTo(camera, mapAnimationOptions { duration(800) })
+        }
+        store.consumeTrackFit(id)
     }
 
     // Sin camara guardada y sin GPS aun: usar la ultima ubicacion conocida del sistema
@@ -650,6 +711,9 @@ fun MapScreen(
                     // Mapbox elige las unidades según la región del teléfono (aquí salía en ft y millas): siempre métrica.
                     scalebar.updateSettings { isMetricUnits = true }
                     // La linea se crea antes que los marcadores para que quede debajo de ellos.
+                    // Primero los recorridos guardados, luego el que se graba en vivo: queda encima.
+                    savedTracksManagerRef.value = annotations.createPolylineAnnotationManager()
+                    savedDotsManagerRef.value = annotations.createCircleAnnotationManager()
                     trackManagerRef.value = annotations.createPolylineAnnotationManager()
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
                     courseManagerRef.value = annotations.createPolylineAnnotationManager()

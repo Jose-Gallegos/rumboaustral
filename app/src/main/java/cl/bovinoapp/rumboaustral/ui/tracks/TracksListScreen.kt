@@ -1,5 +1,6 @@
 package cl.bovinoapp.rumboaustral.ui.tracks
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,9 +51,10 @@ private val DATE_FORMAT = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TracksListScreen(container: AppContainer) {
+fun TracksListScreen(container: AppContainer, onShowTrackOnMap: () -> Unit) {
     val viewModel: TracksViewModel = viewModel(factory = tracksViewModelFactory(container))
     val tracks by viewModel.tracks.collectAsState()
+    val visibleTrackIds by container.mapStateStore.visibleTrackIds.collectAsState()
     val recordingSnapshot by TrackRecordingState.snapshot.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -125,6 +129,35 @@ fun TracksListScreen(container: AppContainer) {
                             )
                         }
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            val isShown = track.id in visibleTrackIds
+                            IconButton(
+                                // El recorrido que se esta grabando ya se dibuja en vivo en el mapa.
+                                enabled = !isActivelyRecording,
+                                onClick = {
+                                    // Operaciones explicitas (no alternar): un doble toque mientras se consultan los
+                                    // puntos repite "mostrar" en vez de mostrar y volver a ocultar.
+                                    if (isShown) {
+                                        container.mapStateStore.hideTrack(track.id)
+                                    } else scope.launch {
+                                        // Sin ningun punto (se detuvo antes del primer fix) no hay nada que dibujar:
+                                        // se avisa en vez de marcarlo visible y cambiar de pantalla.
+                                        if (viewModel.pointsFor(track).isEmpty()) {
+                                            Toast.makeText(
+                                                context, "Este recorrido no tiene puntos para mostrar", Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            container.mapStateStore.showTrack(track.id)
+                                            // Al mostrarlo se pasa al mapa, donde se encuadra.
+                                            onShowTrackOnMap()
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    if (isShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (isShown) "Ocultar del mapa" else "Ver en el mapa"
+                                )
+                            }
                             IconButton(onClick = { trackToRename = track }) {
                                 Icon(Icons.Filled.Edit, contentDescription = "Renombrar")
                             }

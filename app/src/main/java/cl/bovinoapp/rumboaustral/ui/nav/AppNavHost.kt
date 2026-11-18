@@ -159,7 +159,16 @@ fun AppNavHost(container: AppContainer) {
                 DownloadsScreen(container = container)
             }
             composable(ROUTE_TRACKS) {
-                TracksListScreen(container = container)
+                TracksListScreen(
+                    container = container,
+                    onShowTrackOnMap = {
+                        navController.navigate(ROUTE_MAP) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
             }
             composable(
                 ROUTE_POINT_EDIT,
