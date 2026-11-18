@@ -15,6 +15,7 @@ import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import cl.bovinoapp.rumboaustral.R
+import cl.bovinoapp.rumboaustral.RumboAustralApp
 import cl.bovinoapp.rumboaustral.data.AppDatabase
 import cl.bovinoapp.rumboaustral.data.TrackPoint
 import cl.bovinoapp.rumboaustral.data.TracksRepository
@@ -133,7 +134,11 @@ class TrackRecordingService : Service() {
         // Se encola en la misma cadena que las escrituras de puntos (en vez de un scope.launch aparte)
         // para que "Detener" (que espera el ultimo eslabon de esa cadena) nunca lea trackId = 0 por
         // haberse ejecutado antes de que esto termine.
+        // Antes de crear el recorrido se espera a que termine la recuperación de recorridos cortados: así no puede
+        // cerrar por error este recorrido nuevo (y no depende de comparar horas).
+        val recovery = (application as RumboAustralApp).container.interruptedRecovery
         enqueueWrite {
+            recovery.join()
             trackId = repository.startTrack(name, startedAt)
             TrackRecordingState.update(TrackRecordingState.Snapshot(trackId, name, 0.0, startedAt))
             startLocationUpdates(name)

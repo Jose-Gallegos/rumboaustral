@@ -14,6 +14,9 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE id = :id")
     suspend fun getById(id: Long): Track?
 
+    @Query("SELECT * FROM tracks WHERE endedAt IS NULL")
+    suspend fun getUnfinished(): List<Track>
+
     @Insert
     suspend fun insertTrack(track: Track): Long
 
