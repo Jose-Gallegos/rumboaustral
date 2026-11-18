@@ -6,6 +6,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import cl.bovinoapp.rumboaustral.data.Point
+import cl.bovinoapp.rumboaustral.data.Track
+import cl.bovinoapp.rumboaustral.data.TrackPoint
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -61,6 +63,7 @@ import cl.bovinoapp.rumboaustral.geo.formatDistance
 import cl.bovinoapp.rumboaustral.geo.formatBearingWithCardinal
 import cl.bovinoapp.rumboaustral.geo.initialBearingDegrees
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Timeline
 import com.google.gson.JsonPrimitive
 import com.mapbox.maps.plugin.annotation.generated.OnPointAnnotationClickListener
 import com.mapbox.maps.plugin.gestures.OnMapClickListener
@@ -176,6 +179,111 @@ private suspend fun probeCrosshair(view: MapView, radiusPx: Float): CrosshairTar
     return hits.firstOrNull()?.let { CrosshairTarget(it.first) }
 }
 
+/** Punto de un recorrido guardado bajo la cruz: su recorrido y la posición del punto dentro de él. */
+private data class TrackCrosshairTarget(val trackId: Long, val index: Int)
+
+/** Estadísticas del recorrido hasta el punto bajo la cruz (y lo que falta hasta el final). */
+private data class TrackPointStats(
+    val trackName: String,
+    val distanceSoFar: Double,
+    val elapsedMs: Long,
+    val speedKmh: Double,
+    val remainingDistance: Double,
+    val remainingMs: Long
+)
+
+/** distanceSoFar[i] = metros recorridos entre el primer punto y el punto i. */
+private fun cumulativeDistances(points: List<TrackPoint>): DoubleArray {
+    val result = DoubleArray(points.size)
+    for (i in 1 until points.size) {
+        val a = points[i - 1]
+        val b = points[i]
+        result[i] = result[i - 1] + distanceMeters(a.latitude, a.longitude, b.latitude, b.longitude)
+    }
+    return result
+}
+
+/** Puntos y distancia acumulada de un recorrido guardado, cacheados juntos por ID. */
+private class TrackCache(val points: List<TrackPoint>, val cumulative: DoubleArray)
+
+/** ID de la capa con un marcador invisible por cada punto de los recorridos guardados visibles: existe solo
+ * para poder consultarla por posición en pantalla, igual que [POINTS_LAYER_ID] con los waypoints sueltos. */
+private const val TRACK_POINTS_LAYER_ID = "rumbo-track-points-layer"
+
+/** Deja lugar para recorridos de hasta 10 millones de puntos (de sobra: un fix de GPS por segundo, 24/7,
+ * tardaría más de tres meses en llegar ahí) al codificar (trackId, index) en el mismo Long de custom_data. */
+private const val TRACK_POINT_INDEX_SPACE = 10_000_000L
+private fun encodeTrackPointId(trackId: Long, index: Int): Long = trackId * TRACK_POINT_INDEX_SPACE + index
+private fun decodeTrackPointId(encoded: Long): TrackCrosshairTarget =
+    TrackCrosshairTarget(encoded / TRACK_POINT_INDEX_SPACE, (encoded % TRACK_POINT_INDEX_SPACE).toInt())
+
+/**
+ * Punto de algún recorrido guardado más cercano a la cruz central, dentro de [radiusPx], o null. Igual que
+ * [probeCrosshair] con los waypoints sueltos: se consulta la capa de marcadores invisibles de [TRACK_POINTS_LAYER_ID]
+ * (uno por punto de cada recorrido visible), así el hit-test en pantalla lo hace Mapbox, exacto y en su propio
+ * motor, sin aproximar la proyección ni recorrer los puntos uno a uno del lado de Kotlin.
+ */
+private suspend fun probeTrackCrosshair(view: MapView, radiusPx: Float): TrackCrosshairTarget? {
+    if (view.width == 0 || view.height == 0) return null
+    val map = view.mapboxMap
+    val cx = view.width / 2.0
+    val cy = view.height / 2.0
+    val box = ScreenBox(ScreenCoordinate(cx - radiusPx, cy - radiusPx), ScreenCoordinate(cx + radiusPx, cy + radiusPx))
+    val features = suspendCancellableCoroutine<List<QueriedRenderedFeature>> { continuation ->
+        try {
+            val handle = map.queryRenderedFeatures(
+                RenderedQueryGeometry(box),
+                RenderedQueryOptions(listOf(TRACK_POINTS_LAYER_ID), null)
+            ) { result -> if (continuation.isActive) continuation.resume(result.value.orEmpty()) }
+            continuation.invokeOnCancellation { handle.cancel() }
+        } catch (e: Exception) {
+            if (continuation.isActive) continuation.resume(emptyList())
+        }
+    }
+    val hits = features.mapNotNull { queried ->
+        val feature = queried.queriedFeature.feature
+        val geometry = feature.geometry() as? GeoPoint ?: return@mapNotNull null
+        val encoded = feature.properties()?.get("custom_data")?.takeIf { it.isJsonPrimitive }?.asLong
+            ?: return@mapNotNull null
+        val pixel = map.pixelForCoordinate(geometry)
+        decodeTrackPointId(encoded) to hypot(pixel.x - cx, pixel.y - cy)
+    }.filter { it.second <= radiusPx }.sortedBy { it.second }
+    return hits.firstOrNull()?.first
+}
+
+/**
+ * Velocidad en una ventana de pocos puntos alrededor de [index] (más representativa de ese tramo que el
+ * promedio de todo el recorrido), y lo recorrido/transcurrido hasta ahí y lo que falta hasta el final.
+ */
+private fun computeTrackPointStats(
+    track: Track,
+    points: List<TrackPoint>,
+    cumulative: DoubleArray,
+    index: Int
+): TrackPointStats {
+    // Misma referencia que totalDurationMs (track.startedAt), no el primer fix de GPS: si este tardó en
+    // llegar, descontarlo de ambos lados deja igual el tiempo que falta en el último punto.
+    val elapsedMs = (points[index].timestampMillis - track.startedAt).coerceAtLeast(0)
+    val distanceSoFar = cumulative[index]
+    val windowStart = maxOf(0, index - 2)
+    val windowEnd = minOf(points.lastIndex, index + 2)
+    val windowDistance = cumulative[windowEnd] - cumulative[windowStart]
+    val windowTimeMs = points[windowEnd].timestampMillis - points[windowStart].timestampMillis
+    val speedKmh = if (windowTimeMs > 0) (windowDistance / 1000.0) / (windowTimeMs / 3_600_000.0) else track.avgSpeedKmh
+    val totalDurationMs = (track.endedAt ?: points.last().timestampMillis) - track.startedAt
+    val remainingMs = (totalDurationMs - elapsedMs).coerceAtLeast(0)
+    val remainingDistance = (track.distanceMeters - distanceSoFar).coerceAtLeast(0.0)
+    return TrackPointStats(track.name, distanceSoFar, elapsedMs, speedKmh, remainingDistance, remainingMs)
+}
+
+/** "1 h 05 min" o "8 min", según la duración. */
+private fun formatDuration(ms: Long): String {
+    val totalMin = ms / 60_000
+    val hours = totalMin / 60
+    val minutes = totalMin % 60
+    return if (hours > 0) "%d h %02d min".format(hours, minutes) else "%d min".format(minutes)
+}
+
 private fun cameraAt(latitude: Double, longitude: Double) = CameraOptions.Builder()
     .center(GeoPoint.fromLngLat(longitude, latitude))
     .zoom(15.0)
@@ -240,6 +348,8 @@ fun MapScreen(
     // en un administrador propio, encima de los marcadores, para que los toques sigan llegando al punto de abajo.
     val cameraTick = remember { mutableIntStateOf(0) }
     val crosshairTarget = remember { mutableStateOf<CrosshairTarget?>(null) }
+    // Punto de un recorrido guardado bajo la cruz: habilita el informativo con distancia/tiempo recorrido y faltante.
+    val trackCrosshair = remember { mutableStateOf<TrackCrosshairTarget?>(null) }
     val highlightManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
     val highlightBitmaps = remember { HashMap<Int, android.graphics.Bitmap>() }
     val density = LocalDensity.current.density
@@ -314,24 +424,35 @@ fun MapScreen(
     }
 
     // Recorridos guardados que el usuario eligio ver: una linea por recorrido, con un color propio. Los puntos de un
-    // recorrido terminado no cambian, asi que se cachean por ID.
+    // recorrido terminado no cambian, asi que se cachean por ID (con su hora, para el informativo de la cruz).
     val savedTracksManagerRef = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
     val visibleTrackIds by store.visibleTrackIds.collectAsState()
-    val savedTrackPoints = remember { HashMap<Long, List<GeoPoint>>() }
-    suspend fun pointsOfTrack(id: Long): List<GeoPoint> = savedTrackPoints[id]
-        ?: container.tracksRepository.getTrackPoints(id)
-            .map { GeoPoint.fromLngLat(it.longitude, it.latitude) }
-            .also { if (it.isNotEmpty()) savedTrackPoints[id] = it }
+    val tracks by container.tracksRepository.observeAll().collectAsState(initial = emptyList())
+    val savedTrackCaches = remember { HashMap<Long, TrackCache>() }
+    suspend fun cacheOfTrack(id: Long): TrackCache? = savedTrackCaches[id] ?: run {
+        val points = container.tracksRepository.getTrackPoints(id)
+        if (points.isEmpty()) return@run null
+        TrackCache(points, cumulativeDistances(points)).also { savedTrackCaches[id] = it }
+    }
+    suspend fun pointsOfTrack(id: Long): List<GeoPoint> =
+        (cacheOfTrack(id)?.points ?: emptyList()).map { GeoPoint.fromLngLat(it.longitude, it.latitude) }
     // Un recorrido de un solo punto (se detuvo antes del segundo fix de GPS) no forma una linea: se dibuja como un
     // punto, con el mismo color que tendria su linea.
     val savedDotsManagerRef = remember { mutableStateOf<CircleAnnotationManager?>(null) }
-    LaunchedEffect(visibleTrackIds, savedTracksManagerRef.value, savedDotsManagerRef.value) {
+    // Marcador invisible por cada punto de los recorridos visibles, solo para que la cruz pueda consultarlos por
+    // posicion en pantalla (ver probeTrackCrosshair): el mismo mecanismo que usan los waypoints sueltos.
+    val trackPointsManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
+    val invisibleTrackPointBitmap = remember { createInvisibleBitmap() }
+    LaunchedEffect(visibleTrackIds, savedTracksManagerRef.value, savedDotsManagerRef.value, trackPointsManagerRef.value) {
         val manager = savedTracksManagerRef.value ?: return@LaunchedEffect
         val dotsManager = savedDotsManagerRef.value ?: return@LaunchedEffect
+        val pointsManager = trackPointsManagerRef.value ?: return@LaunchedEffect
         val lines = ArrayList<PolylineAnnotationOptions>()
         val dots = ArrayList<CircleAnnotationOptions>()
+        val hitTargets = ArrayList<PointAnnotationOptions>()
         for (id in visibleTrackIds.sorted()) {
-            val points = pointsOfTrack(id)
+            val cache = cacheOfTrack(id)
+            val points = (cache?.points ?: emptyList()).map { GeoPoint.fromLngLat(it.longitude, it.latitude) }
             val color = SAVED_TRACK_COLORS[(id % SAVED_TRACK_COLORS.size).toInt()]
             when {
                 points.size >= 2 -> lines += PolylineAnnotationOptions()
@@ -345,11 +466,19 @@ fun MapScreen(
                     .withCircleStrokeColor("#FFFFFF")
                     .withCircleStrokeWidth(2.0)
             }
+            points.forEachIndexed { index, geoPoint ->
+                hitTargets += PointAnnotationOptions()
+                    .withPoint(geoPoint)
+                    .withIconImage(invisibleTrackPointBitmap)
+                    .withData(JsonPrimitive(encodeTrackPointId(id, index)))
+            }
         }
         manager.deleteAll()
         dotsManager.deleteAll()
+        pointsManager.deleteAll()
         if (lines.isNotEmpty()) manager.create(lines)
         if (dots.isNotEmpty()) dotsManager.create(dots)
+        if (hitTargets.isNotEmpty()) pointsManager.create(hitTargets)
     }
     // Al pedir "ver en el mapa" desde la lista, la camara encuadra ese recorrido completo.
     val trackToFit by store.trackToFit.collectAsState()
@@ -605,6 +734,25 @@ fun MapScreen(
         }
     }
 
+    // Sondeo de la cruz sobre los recorridos guardados visibles: misma mecánica que con los waypoints sueltos,
+    // contra la capa de marcadores invisibles de TRACK_POINTS_LAYER_ID.
+    LaunchedEffect(mapView, trackPointsManagerRef.value, visibleTrackIds) {
+        val view = mapView ?: return@LaunchedEffect
+        if (trackPointsManagerRef.value == null) return@LaunchedEffect
+        snapshotFlow { cameraTick.intValue }.collect {
+            trackCrosshair.value = probeTrackCrosshair(view, CROSSHAIR_RADIUS_DP * density)
+        }
+    }
+    val trackPointStats = remember(trackCrosshair.value, tracks) {
+        trackCrosshair.value?.let { hit ->
+            val track = tracks.firstOrNull { it.id == hit.trackId }
+            val cache = savedTrackCaches[hit.trackId]
+            if (track != null && cache != null && hit.index in cache.points.indices) {
+                computeTrackPointStats(track, cache.points, cache.cumulative, hit.index)
+            } else null
+        }
+    }
+
     // Texto del resaltado: "Nombre - 420 m" (solo el nombre si no hay GPS).
     val crosshairPoint = remember(crosshairTarget.value, points) {
         crosshairTarget.value?.let { target -> points.firstOrNull { it.id == target.pointId } }
@@ -714,6 +862,16 @@ fun MapScreen(
                     // Primero los recorridos guardados, luego el que se graba en vivo: queda encima.
                     savedTracksManagerRef.value = annotations.createPolylineAnnotationManager()
                     savedDotsManagerRef.value = annotations.createCircleAnnotationManager()
+                    // Capa propia (igual que POINTS_LAYER_ID con los waypoints) para que el sondeo de la cruz
+                    // pueda consultarla sin tocar la de los marcadores sueltos. Sin estas dos opciones, el
+                    // motor de colocación de símbolos puede omitir puntos que caen muy juntos en pantalla
+                    // (recorridos con muchos fixes de GPS cercanos) y queryRenderedFeatures no los vería.
+                    trackPointsManagerRef.value = annotations.createPointAnnotationManager(
+                        AnnotationConfig(layerId = TRACK_POINTS_LAYER_ID)
+                    ).also { manager ->
+                        manager.iconAllowOverlap = true
+                        manager.iconIgnorePlacement = true
+                    }
                     trackManagerRef.value = annotations.createPolylineAnnotationManager()
                     polylineManagerRef.value = annotations.createPolylineAnnotationManager()
                     courseManagerRef.value = annotations.createPolylineAnnotationManager()
@@ -1013,6 +1171,42 @@ fun MapScreen(
                             onClick = { pendingNewPoint.value = null }
                         ) {
                             Icon(Icons.Filled.Close, contentDescription = "Cancelar")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Informativo del recorrido guardado bajo la cruz: solo si no hay otra tarjeta ni el chip de
+        // grabación ocupando el mismo lugar (ambos van en la esquina inferior izquierda).
+        if (selectedPoint == null && pendingNewPoint.value == null && !isMeasuring && recordingSnapshot == null) {
+            trackPointStats?.let { stats ->
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 16.dp, bottom = 24.dp, end = 104.dp)
+                        .fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)
+                    ) {
+                        Icon(Icons.Filled.Timeline, contentDescription = null, modifier = Modifier.size(28.dp))
+                        Column(modifier = Modifier.padding(start = 8.dp).weight(1f)) {
+                            Text(
+                                stats.trackName,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${formatDistance(stats.distanceSoFar)} · ${formatDuration(stats.elapsedMs)} · %.1f km/h".format(stats.speedKmh),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Faltan ${formatDistance(stats.remainingDistance)} · ${formatDuration(stats.remainingMs)}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                     }
                 }

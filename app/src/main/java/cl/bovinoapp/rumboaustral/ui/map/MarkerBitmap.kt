@@ -39,3 +39,10 @@ fun createPointMarkerBitmap(diameterPx: Int = 48, fillColor: Int = Color.RED): B
     canvas.drawCircle(radius, radius, radius * 0.75f, borderPaint)
     return bitmap
 }
+
+/**
+ * Icono invisible (totalmente transparente, sin dibujar nada) para un marcador que solo existe para poder
+ * consultarse por posición en pantalla (p. ej. el sondeo de la cruz sobre los puntos de un recorrido guardado),
+ * sin agregar nada visible sobre la línea que ya lo representa.
+ */
+fun createInvisibleBitmap(sizePx: Int = 8): Bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
