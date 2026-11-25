@@ -46,3 +46,33 @@ fun createPointMarkerBitmap(diameterPx: Int = 48, fillColor: Int = Color.RED): B
  * sin agregar nada visible sobre la línea que ya lo representa.
  */
 fun createInvisibleBitmap(sizePx: Int = 8): Bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+
+/** Bandera a cuadros con el pie del mástil centrado en el borde inferior. */
+fun createDestinationFlagBitmap(): Bitmap {
+    val bitmap = Bitmap.createBitmap(76, 56, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val poleX = bitmap.width / 2f
+
+    paint.color = Color.BLACK
+    paint.strokeWidth = 8f
+    canvas.drawLine(poleX, 4f, poleX, 54f, paint)
+    canvas.drawRoundRect(poleX - 4f, 3f, poleX + 34f, 33f, 4f, 4f, paint)
+
+    paint.color = Color.WHITE
+    paint.strokeWidth = 4f
+    canvas.drawLine(poleX, 7f, poleX, 54f, paint)
+    canvas.drawRect(poleX, 6f, poleX + 30f, 30f, paint)
+
+    paint.color = Color.BLACK
+    for (row in 0 until 3) {
+        for (column in 0 until 3) {
+            if ((row + column) % 2 == 0) {
+                val left = poleX + column * 10f
+                val top = 6f + row * 8f
+                canvas.drawRect(left, top, left + 10f, top + 8f, paint)
+            }
+        }
+    }
+    return bitmap
+}

@@ -111,6 +111,7 @@ import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PointAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
+import com.mapbox.maps.extension.style.layers.properties.generated.IconAnchor
 import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.maps.plugin.gestures.OnMapLongClickListener
 import com.mapbox.maps.plugin.gestures.OnMoveListener
@@ -351,6 +352,8 @@ fun MapScreen(
     // Punto de un recorrido guardado bajo la cruz: habilita el informativo con distancia/tiempo recorrido y faltante.
     val trackCrosshair = remember { mutableStateOf<TrackCrosshairTarget?>(null) }
     val highlightManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
+    val destinationManagerRef = remember { mutableStateOf<PointAnnotationManager?>(null) }
+    val destinationFlagBitmap = remember { createDestinationFlagBitmap() }
     val highlightBitmaps = remember { HashMap<Int, android.graphics.Bitmap>() }
     val density = LocalDensity.current.density
 
@@ -664,6 +667,8 @@ fun MapScreen(
     LaunchedEffect(mapView, clustering) {
         val view = mapView ?: return@LaunchedEffect
         val plugin = view.annotations
+        destinationManagerRef.value?.let { plugin.removeAnnotationManager(it) }
+        destinationManagerRef.value = null
         highlightManagerRef.value?.let { plugin.removeAnnotationManager(it) }
         highlightManagerRef.value = null
         annotationManagerRef.value?.let { plugin.removeAnnotationManager(it) }
@@ -721,6 +726,23 @@ fun MapScreen(
             overlay.textAllowOverlap = true
             overlay.textIgnorePlacement = true
         }
+        destinationManagerRef.value = plugin.createPointAnnotationManager().also { overlay ->
+            overlay.iconAllowOverlap = true
+            overlay.iconIgnorePlacement = true
+        }
+    }
+
+    val destinationManager = destinationManagerRef.value
+    LaunchedEffect(destinationManager, targetPoint?.latitude, targetPoint?.longitude) {
+        val overlay = destinationManager ?: return@LaunchedEffect
+        overlay.deleteAll()
+        val target = targetPoint ?: return@LaunchedEffect
+        overlay.create(
+            PointAnnotationOptions()
+                .withPoint(GeoPoint.fromLngLat(target.longitude, target.latitude))
+                .withIconImage(destinationFlagBitmap)
+                .withIconAnchor(IconAnchor.BOTTOM)
+        )
     }
 
     // Sondeo de la cruz: pregunta a Mapbox qué marcadores SUELTOS hay dibujados bajo ella. Así coincide con lo que se
