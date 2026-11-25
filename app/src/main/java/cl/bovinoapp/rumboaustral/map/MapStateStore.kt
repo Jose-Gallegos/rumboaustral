@@ -30,7 +30,7 @@ class MapStateStore(context: Context) {
         if (prefs.contains(KEY_TMP_LAT) && prefs.contains(KEY_TMP_LON)) {
             Point(
                 id = 0L,
-                name = "Destino",
+                name = prefs.getString(KEY_TMP_NAME, null) ?: "Destino",
                 latitude = Double.fromBits(prefs.getLong(KEY_TMP_LAT, 0L)),
                 longitude = Double.fromBits(prefs.getLong(KEY_TMP_LON, 0L))
             )
@@ -88,9 +88,11 @@ class MapStateStore(context: Context) {
             if (tmp != null) {
                 putLong(KEY_TMP_LAT, tmp.latitude.toBits())
                 putLong(KEY_TMP_LON, tmp.longitude.toBits())
+                putString(KEY_TMP_NAME, tmp.name)
             } else {
                 remove(KEY_TMP_LAT)
                 remove(KEY_TMP_LON)
+                remove(KEY_TMP_NAME)
             }
         }.apply()
     }
@@ -102,10 +104,10 @@ class MapStateStore(context: Context) {
         persistNavigation()
     }
 
-    fun navigateToCoordinates(latitude: Double, longitude: Double) {
+    fun navigateToCoordinates(latitude: Double, longitude: Double, name: String = "Destino") {
         navigationTargetId.value = null
         fittedTargetId = null
-        temporaryDestination.value = Point(id = 0L, name = "Destino", latitude = latitude, longitude = longitude)
+        temporaryDestination.value = Point(id = 0L, name = name, latitude = latitude, longitude = longitude)
         persistNavigation()
     }
 
@@ -151,6 +153,7 @@ class MapStateStore(context: Context) {
         const val KEY_NAV_ID = "nav_target_id"
         const val KEY_TMP_LAT = "nav_tmp_lat"
         const val KEY_TMP_LON = "nav_tmp_lon"
+        const val KEY_TMP_NAME = "nav_tmp_name"
         const val KEY_CLUSTERING = "clustering_enabled"
     }
 }

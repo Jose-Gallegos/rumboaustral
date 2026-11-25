@@ -1149,6 +1149,16 @@ fun MapScreen(
                             modifier = buttonSize,
                             enabled = !savingNewPoint.value,
                             onClick = {
+                                store.navigateToCoordinates(target.latitude, target.longitude, name ?: "Nuevo waypoint")
+                                pendingNewPoint.value = null
+                            }
+                        ) {
+                            Icon(Icons.Filled.Navigation, contentDescription = "Navegar")
+                        }
+                        IconButton(
+                            modifier = buttonSize,
+                            enabled = !savingNewPoint.value,
+                            onClick = {
                                 store.startMeasure(name ?: "Nuevo waypoint", target.latitude, target.longitude)
                                 pendingNewPoint.value = null
                             }
