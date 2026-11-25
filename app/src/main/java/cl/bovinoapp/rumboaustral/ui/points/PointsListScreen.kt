@@ -1,9 +1,17 @@
 package cl.bovinoapp.rumboaustral.ui.points
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanIntentResult
+import com.journeyapps.barcodescanner.ScanOptions
+import cl.bovinoapp.rumboaustral.qr.DroneQrResult
+import cl.bovinoapp.rumboaustral.qr.DroneQrParser
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,7 +46,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -53,6 +63,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -73,7 +84,8 @@ fun PointsListScreen(
     onEditPoint: (Long) -> Unit,
     onNavigateToPoint: (Long) -> Unit,
     onMeasureFromPoint: (Point) -> Unit,
-    onAddPoint: () -> Unit
+    onAddPoint: () -> Unit,
+    onAddPointAt: (Double, Double) -> Unit
 ) {
     val viewModel: PointsViewModel = viewModel(factory = pointsViewModelFactory(container))
     val items by viewModel.items.collectAsState()
@@ -164,6 +176,44 @@ fun PointsListScreen(
         if (uri != null) viewModel.exportGpx { context.contentResolver.openOutputStream(uri, "wt") }
     }
 
+    // Escaneo del QR del dron: sin GPX intermedio ni Drongpx instalado, abre directo el editor
+    // de punto nuevo con las coordenadas precargadas para que el usuario las revise y guarde.
+    val scope = rememberCoroutineScope()
+    fun showQrMessage(text: String) {
+        scope.launch { snackbarHostState.showSnackbar(text) }
+    }
+    val qrScanLauncher = rememberLauncherForActivityResult(ScanContract()) { result: ScanIntentResult ->
+        val content = result.contents ?: return@rememberLauncherForActivityResult
+        when (val parsed = DroneQrParser.parse(content)) {
+            is DroneQrResult.Success -> onAddPointAt(parsed.latitude, parsed.longitude)
+            DroneQrResult.NotFound -> showQrMessage("El QR no contiene coordenadas válidas. Intenta de nuevo.")
+            DroneQrResult.Ambiguous -> showQrMessage("El QR contiene más de un par de coordenadas; no se pudo determinar cuál usar.")
+        }
+    }
+    fun launchQrScan() {
+        qrScanLauncher.launch(
+            ScanOptions()
+                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setBeepEnabled(true)
+                .setOrientationLocked(false)
+                .setPrompt("Apunta al QR del dron")
+        )
+    }
+    val qrCameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchQrScan() else showQrMessage("Se necesita permiso de cámara para escanear el QR del dron.")
+    }
+    fun requestQrScan() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            launchQrScan()
+        } else {
+            qrCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     importPreview?.let { preview ->
         ImportPreviewDialog(
             preview = preview,
@@ -209,7 +259,7 @@ fun PointsListScreen(
                     TextButton(onClick = viewModel::selectAllVisible) { Text("Todos (${items.size})") }
                     Button(onClick = { showAssign = true }, enabled = !bulkBusy) { Text("Etiquetar") }
                 }
-            } else Row(
+            } else FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(horizontal = 16.dp)
             ) {
@@ -229,6 +279,13 @@ fun PointsListScreen(
                 ) {
                     Icon(Icons.Filled.Share, contentDescription = null)
                     Text("Exportar GPX", modifier = Modifier.padding(start = 8.dp))
+                }
+                OutlinedButton(
+                    onClick = { requestQrScan() },
+                    enabled = !importing && !saving
+                ) {
+                    Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
+                    Text("Escanear QR del dron", modifier = Modifier.padding(start = 8.dp))
                 }
             }
             FlowRow(

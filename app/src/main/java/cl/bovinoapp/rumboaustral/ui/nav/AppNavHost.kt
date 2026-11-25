@@ -152,7 +152,10 @@ fun AppNavHost(container: AppContainer) {
                             restoreState = true
                         }
                     },
-                    onAddPoint = { navController.navigate("punto/editar?pointId=0&lat=0&lon=0") }
+                    onAddPoint = { navController.navigate("punto/editar?pointId=0&lat=0&lon=0") },
+                    onAddPointAt = { lat, lon ->
+                        navController.navigate("punto/editar?pointId=0&lat=$lat&lon=$lon")
+                    }
                 )
             }
             composable(ROUTE_DOWNLOADS) {

@@ -102,6 +102,8 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.mapbox.maps.android)
     implementation(libs.coil.compose)
+    implementation(libs.zxing.android.embedded)
+    implementation(libs.zxing.core)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
